@@ -47,6 +47,7 @@ jobs:
         run: |
           flutter create . --platforms=android --project-name=rado_passenger --org=ir.rado.taxi
           rm -f test/widget_test.dart
+          python3 ../../scripts/configure_android_branding.py android/app/src/main/AndroidManifest.xml "RADO"
 
       - name: Configure Android runtime permissions
         if: steps.credentials.outcome == 'success'
