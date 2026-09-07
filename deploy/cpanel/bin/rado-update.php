@@ -22,6 +22,13 @@ function downloadFile(string $url,string $dest,array $config):void{
     if(!$ok||$code<200||$code>=300){@unlink($dest);throw new RuntimeException("Download failed ($code): $err");}
 }
 function assetByName(array $assets,string $name):?array{foreach($assets as $asset) if(($asset['name']??'')===$name) return $asset; return null;}
+function shouldPreserve(string $rel, array $config): bool {
+    foreach (($config['preserve'] ?? []) as $path) {
+        $path = trim((string)$path, '/');
+        if ($rel === $path || str_starts_with($rel, $path . '/')) return true;
+    }
+    return false;
+}
 try{
     $repo=$config['repo'];
     $release=json_decode(httpGet($config['github_api']."/repos/$repo/releases/latest",$config),true,512,JSON_THROW_ON_ERROR);
@@ -49,7 +56,12 @@ try{
         $zip=new ZipArchive(); if($zip->open($tmpZip)!==true) throw new RuntimeException('Cannot open cPanel ZIP');
         $tmpDir=sys_get_temp_dir().'/rado-extract-'.bin2hex(random_bytes(6)); mkdir($tmpDir,0755,true); $zip->extractTo($tmpDir); $zip->close();
         $it=new RecursiveIteratorIterator(new RecursiveDirectoryIterator($tmpDir,FilesystemIterator::SKIP_DOTS),RecursiveIteratorIterator::SELF_FIRST);
-        foreach($it as $item){$rel=substr($item->getPathname(),strlen($tmpDir)+1); if($rel==='.env'||str_starts_with($rel,'storage/')||str_starts_with($rel,'rado-system/state/')) continue; $dest=$root.'/'.$rel; if($item->isDir()) @mkdir($dest,0755,true); else {@mkdir(dirname($dest),0755,true);copy($item->getPathname(),$dest);}}
+        foreach($it as $item){
+            $rel=substr($item->getPathname(),strlen($tmpDir)+1);
+            if(shouldPreserve($rel,$config)) continue;
+            $dest=$root.'/'.$rel;
+            if($item->isDir()) @mkdir($dest,0755,true); else {@mkdir(dirname($dest),0755,true);copy($item->getPathname(),$dest);}
+        }
         @unlink($tmpZip);
     }
     file_put_contents($stateDir.'/release.json.tmp',json_encode($meta,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_PRETTY_PRINT)); rename($stateDir.'/release.json.tmp',$stateDir.'/release.json');
