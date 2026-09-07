@@ -1,0 +1,159 @@
+name: RADO First Production Build
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/RADO_FIRST_RELEASE_BUILD'
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Resolve release version
+        run: |
+          VERSION="$(tr -d '[:space:]' < .github/RADO_FIRST_RELEASE_BUILD)"
+          test -n "$VERSION" || (echo 'Empty release version' && exit 1)
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "BUILD_CODE=$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
+
+      - name: Fetch permanent signing credentials from RADO cPanel
+        run: bash scripts/fetch_cpanel_ci_credentials.sh
+
+      - name: Fetch official RADO icons from cPanel
+        run: |
+          mkdir -p apps/passenger/assets/branding apps/driver/assets/branding dist/icons
+          curl -fsSL https://rado-taxi.sbs/assets/branding/rado-passenger.png -o apps/passenger/assets/branding/rado-passenger.png
+          curl -fsSL https://rado-taxi.sbs/assets/branding/rado-driver.png -o apps/driver/assets/branding/rado-driver.png
+          cp apps/passenger/assets/branding/rado-passenger.png dist/icons/rado-passenger.png
+          cp apps/driver/assets/branding/rado-driver.png dist/icons/rado-driver.png
+
+      - name: Build Passenger APK
+        working-directory: apps/passenger
+        run: |
+          flutter create . --platforms=android --project-name=rado_passenger --org=ir.rado.taxi
+          rm -f test/widget_test.dart
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('android/app/src/main/AndroidManifest.xml')
+          s=p.read_text(); marker='<manifest xmlns:android="http://schemas.android.com/apk/res/android">'
+          perms='''<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n    <uses-permission android:name="android.permission.INTERNET"/>\n    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>'''
+          if 'android.permission.INTERNET' not in s: s=s.replace(marker,perms,1)
+          p.write_text(s)
+          PY
+          flutter pub get
+          dart run flutter_launcher_icons
+          echo "$KEYSTORE_B64" | base64 --decode > android/app/rado-release.keystore
+          cat > android/key.properties <<EOF
+          storePassword=$STORE_PASSWORD
+          keyPassword=$KEY_PASSWORD
+          keyAlias=$KEY_ALIAS
+          storeFile=rado-release.keystore
+          EOF
+          python3 ../../scripts/configure_android_signing.py android/app/build.gradle.kts
+          flutter analyze
+          flutter build apk --release \
+            --build-name="$VERSION" \
+            --build-number="$BUILD_CODE" \
+            --dart-define=NESHAN_MAP_KEY="$NESHAN_MAP_KEY" \
+            --dart-define=RADO_API_BASE_URL="https://rado-taxi.sbs"
+          cp build/app/outputs/flutter-apk/app-release.apk "../../RADO-Passenger-v${VERSION}.apk"
+
+      - name: Build Driver APK
+        working-directory: apps/driver
+        run: |
+          flutter create . --platforms=android --project-name=rado_driver --org=ir.rado.taxi
+          rm -f test/widget_test.dart
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('android/app/src/main/AndroidManifest.xml')
+          s=p.read_text(); marker='<manifest xmlns:android="http://schemas.android.com/apk/res/android">'
+          perms='''<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n    <uses-permission android:name="android.permission.INTERNET"/>\n    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>'''
+          if 'android.permission.INTERNET' not in s: s=s.replace(marker,perms,1)
+          p.write_text(s)
+          PY
+          flutter pub get
+          dart run flutter_launcher_icons
+          echo "$KEYSTORE_B64" | base64 --decode > android/app/rado-release.keystore
+          cat > android/key.properties <<EOF
+          storePassword=$STORE_PASSWORD
+          keyPassword=$KEY_PASSWORD
+          keyAlias=$KEY_ALIAS
+          storeFile=rado-release.keystore
+          EOF
+          python3 ../../scripts/configure_android_signing.py android/app/build.gradle.kts
+          flutter analyze
+          flutter build apk --release --build-name="$VERSION" --build-number="$BUILD_CODE"
+          cp build/app/outputs/flutter-apk/app-release.apk "../../RADO-Driver-v${VERSION}.apk"
+
+      - name: Build cPanel package
+        run: |
+          rm -rf dist/cpanel
+          mkdir -p dist/cpanel/rado-system/bin dist/cpanel/rado-system/state dist/cpanel/rado-system/private dist/cpanel/downloads dist/cpanel/assets/branding dist/cpanel/api/app-updates dist/cpanel/api/ci-credentials dist/cpanel/api/health dist/cpanel/sql
+          cp deploy/cpanel/.htaccess dist/cpanel/.htaccess
+          cp deploy/cpanel/index.php dist/cpanel/index.php
+          cp deploy/cpanel/setup.php dist/cpanel/setup.php
+          cp deploy/cpanel/downloads/.htaccess dist/cpanel/downloads/.htaccess
+          cp deploy/cpanel/config.php dist/cpanel/rado-system/config.php
+          cp deploy/cpanel/rado-system/private/.htaccess dist/cpanel/rado-system/private/.htaccess
+          cp deploy/cpanel/bin/rado-update.php dist/cpanel/rado-system/bin/rado-update.php
+          cp deploy/cpanel/api/app-updates/index.php dist/cpanel/api/app-updates/index.php
+          cp deploy/cpanel/api/ci-credentials/index.php dist/cpanel/api/ci-credentials/index.php
+          cp deploy/cpanel/api/health/index.php dist/cpanel/api/health/index.php
+          cp deploy/cpanel/sql/schema.sql dist/cpanel/sql/schema.sql
+          cp deploy/cpanel/INSTALL.txt dist/cpanel/INSTALL.txt
+          cp dist/icons/rado-passenger.png dist/cpanel/assets/branding/rado-passenger.png
+          cp dist/icons/rado-driver.png dist/cpanel/assets/branding/rado-driver.png
+          (cd dist/cpanel && zip -qr "../../RADO-cPanel-v${VERSION}.zip" .)
+
+      - name: Generate release manifest and checksums
+        run: |
+          PASSENGER="RADO-Passenger-v${VERSION}.apk"
+          DRIVER="RADO-Driver-v${VERSION}.apk"
+          CPANEL="RADO-cPanel-v${VERSION}.zip"
+          PASS_SHA=$(sha256sum "$PASSENGER" | awk '{print $1}')
+          DRIVER_SHA=$(sha256sum "$DRIVER" | awk '{print $1}')
+          CPANEL_SHA=$(sha256sum "$CPANEL" | awk '{print $1}')
+          python3 - <<PY
+          import json, os, datetime
+          version=os.environ['VERSION']; code=int(os.environ['BUILD_CODE'])
+          data={
+            'release':version,
+            'published_at':datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            'apps':{
+              'passenger':{'version':version,'version_code':code,'minimum_supported_code':1,'mandatory':False,'asset':f'RADO-Passenger-v{version}.apk','sha256':'$PASS_SHA'},
+              'driver':{'version':version,'version_code':code,'minimum_supported_code':1,'mandatory':False,'asset':f'RADO-Driver-v{version}.apk','sha256':'$DRIVER_SHA'}
+            },
+            'cpanel':{'version':version,'asset':f'RADO-cPanel-v{version}.zip','sha256':'$CPANEL_SHA'}
+          }
+          open('RADO-release.json','w').write(json.dumps(data,ensure_ascii=False,indent=2))
+          PY
+          sha256sum "$PASSENGER" "$DRIVER" "$CPANEL" RADO-release.json > SHA256SUMS.txt
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION }}
+          target_commitish: main
+          name: RADO v${{ env.VERSION }}
+          generate_release_notes: true
+          files: |
+            RADO-Passenger-v${{ env.VERSION }}.apk
+            RADO-Driver-v${{ env.VERSION }}.apk
+            RADO-cPanel-v${{ env.VERSION }}.zip
+            RADO-release.json
+            SHA256SUMS.txt
