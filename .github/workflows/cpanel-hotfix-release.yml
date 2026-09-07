@@ -1,0 +1,64 @@
+name: RADO cPanel Bootstrap Hotfix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/RADO_CPANEL_HOTFIX_RELEASE'
+
+permissions:
+  contents: write
+
+jobs:
+  hotfix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve hotfix version
+        run: |
+          VERSION="$(tr -d '[:space:]' < .github/RADO_CPANEL_HOTFIX_RELEASE)"
+          test -n "$VERSION" || (echo 'Empty version' && exit 1)
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+
+      - name: Build cPanel hotfix package
+        run: |
+          rm -rf dist/hotfix
+          mkdir -p dist/hotfix/api/ci-credentials dist/hotfix/rado-system
+          cp deploy/cpanel/api/ci-credentials/index.php dist/hotfix/api/ci-credentials/index.php
+          cp deploy/cpanel/.htaccess dist/hotfix/.htaccess
+          cp deploy/cpanel/config.php dist/hotfix/rado-system/config.php
+          (cd dist/hotfix && zip -qr "../../RADO-cPanel-v${VERSION}.zip" .)
+
+      - name: Generate bootstrap manifest
+        run: |
+          CPANEL="RADO-cPanel-v${VERSION}.zip"
+          CPANEL_SHA=$(sha256sum "$CPANEL" | awk '{print $1}')
+          python3 - <<PY
+          import json, os, datetime
+          version=os.environ['VERSION']
+          data={
+            'release':version,
+            'published_at':datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            'apps':{
+              'passenger':{'version':'0.2.2','version_code':0,'minimum_supported_code':0,'mandatory':False,'asset':'','sha256':''},
+              'driver':{'version':'0.2.2','version_code':0,'minimum_supported_code':0,'mandatory':False,'asset':'','sha256':''}
+            },
+            'cpanel':{'version':version,'asset':f'RADO-cPanel-v{version}.zip','sha256':'$CPANEL_SHA'}
+          }
+          open('RADO-release.json','w').write(json.dumps(data,ensure_ascii=False,indent=2))
+          PY
+          sha256sum "$CPANEL" RADO-release.json > SHA256SUMS.txt
+
+      - name: Publish cPanel hotfix release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION }}
+          target_commitish: main
+          name: RADO cPanel Hotfix v${{ env.VERSION }}
+          body: Bootstrap hotfix for the RADO cPanel OIDC signing broker. No Android app update is included in this intermediate release.
+          files: |
+            RADO-cPanel-v${{ env.VERSION }}.zip
+            RADO-release.json
+            SHA256SUMS.txt
