@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write
 
 jobs:
   release:
@@ -29,19 +30,8 @@ jobs:
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "BUILD_CODE=$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
 
-      - name: Verify release secrets
-        env:
-          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-          NESHAN_MAP_KEY: ${{ secrets.NESHAN_MAP_KEY }}
-        run: |
-          test -n "$KEYSTORE_B64" || (echo 'Missing ANDROID_KEYSTORE_BASE64' && exit 1)
-          test -n "$STORE_PASSWORD" || (echo 'Missing ANDROID_KEYSTORE_PASSWORD' && exit 1)
-          test -n "$KEY_ALIAS" || (echo 'Missing ANDROID_KEY_ALIAS' && exit 1)
-          test -n "$KEY_PASSWORD" || (echo 'Missing ANDROID_KEY_PASSWORD' && exit 1)
-          test -n "$NESHAN_MAP_KEY" || (echo 'Missing NESHAN_MAP_KEY' && exit 1)
+      - name: Fetch permanent signing credentials from RADO cPanel
+        run: bash scripts/fetch_cpanel_ci_credentials.sh
 
       - name: Fetch official RADO icons from cPanel
         run: |
@@ -53,12 +43,6 @@ jobs:
 
       - name: Build Passenger APK
         working-directory: apps/passenger
-        env:
-          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-          NESHAN_MAP_KEY: ${{ secrets.NESHAN_MAP_KEY }}
         run: |
           flutter create . --platforms=android --project-name=rado_passenger --org=ir.rado.taxi
           rm -f test/widget_test.dart
@@ -90,11 +74,6 @@ jobs:
 
       - name: Build Driver APK
         working-directory: apps/driver
-        env:
-          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           flutter create . --platforms=android --project-name=rado_driver --org=ir.rado.taxi
           rm -f test/widget_test.dart
@@ -123,12 +102,22 @@ jobs:
       - name: Build cPanel package
         run: |
           rm -rf dist/cpanel
-          mkdir -p dist/cpanel/rado-system/bin dist/cpanel/rado-system/state dist/cpanel/downloads dist/cpanel/assets/branding dist/cpanel/api/app-updates
+          mkdir -p \
+            dist/cpanel/rado-system/bin \
+            dist/cpanel/rado-system/state \
+            dist/cpanel/rado-system/private \
+            dist/cpanel/downloads \
+            dist/cpanel/assets/branding \
+            dist/cpanel/api/app-updates \
+            dist/cpanel/api/ci-credentials
           cp deploy/cpanel/.htaccess dist/cpanel/.htaccess
           cp deploy/cpanel/downloads/.htaccess dist/cpanel/downloads/.htaccess
           cp deploy/cpanel/config.php dist/cpanel/rado-system/config.php
+          cp deploy/cpanel/rado-system/private/.htaccess dist/cpanel/rado-system/private/.htaccess
           cp deploy/cpanel/bin/rado-update.php dist/cpanel/rado-system/bin/rado-update.php
           cp deploy/cpanel/api/app-updates/index.php dist/cpanel/api/app-updates/index.php
+          cp deploy/cpanel/api/ci-credentials/index.php dist/cpanel/api/ci-credentials/index.php
+          cp deploy/cpanel/setup.php dist/cpanel/setup.php
           cp deploy/cpanel/INSTALL.txt dist/cpanel/INSTALL.txt
           cp dist/icons/rado-passenger.png dist/cpanel/assets/branding/rado-passenger.png
           cp dist/icons/rado-driver.png dist/cpanel/assets/branding/rado-driver.png
