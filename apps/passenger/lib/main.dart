@@ -2,8 +2,9 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:neshan_maps_flutter/map.dart';
+import 'app_update.dart';
 
-void main() => runApp(const RadoPassengerApp());
+void main() => runApp(const RadoUpdateGate(app: 'passenger', child: RadoPassengerApp()));
 
 const _brandYellow = Color(0xFFF7B500);
 const _brandBlack = Color(0xFF171717);
