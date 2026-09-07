@@ -7,5 +7,5 @@ RewriteEngine On
 RewriteCond %{HTTP:Authorization} ^(.+)$
 RewriteRule .* - [E=HTTP_AUTHORIZATION:%1]
 RewriteRule ^api/app-updates/(passenger|driver)/?$ api/app-updates/index.php?app=$1 [L,QSA]
-RewriteRule ^api/v1/maps/reverse/?$ api/v1/maps/reverse/index.php [L,QSA]
+RewriteRule ^api/v1/maps/reverse/?$ api/health/index.php?service=reverse [L,QSA]
 RewriteRule ^rado-system/ - [F,L]
