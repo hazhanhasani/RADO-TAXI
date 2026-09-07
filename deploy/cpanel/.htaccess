@@ -1,4 +1,5 @@
 Options -Indexes
+DirectoryIndex index.php
 <FilesMatch "^RADO-cPanel.*\.zip$">
     Require all denied
 </FilesMatch>
