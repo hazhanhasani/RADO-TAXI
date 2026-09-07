@@ -109,15 +109,20 @@ jobs:
             dist/cpanel/downloads \
             dist/cpanel/assets/branding \
             dist/cpanel/api/app-updates \
-            dist/cpanel/api/ci-credentials
+            dist/cpanel/api/ci-credentials \
+            dist/cpanel/api/health \
+            dist/cpanel/sql
           cp deploy/cpanel/.htaccess dist/cpanel/.htaccess
+          cp deploy/cpanel/index.php dist/cpanel/index.php
+          cp deploy/cpanel/setup.php dist/cpanel/setup.php
           cp deploy/cpanel/downloads/.htaccess dist/cpanel/downloads/.htaccess
           cp deploy/cpanel/config.php dist/cpanel/rado-system/config.php
           cp deploy/cpanel/rado-system/private/.htaccess dist/cpanel/rado-system/private/.htaccess
           cp deploy/cpanel/bin/rado-update.php dist/cpanel/rado-system/bin/rado-update.php
           cp deploy/cpanel/api/app-updates/index.php dist/cpanel/api/app-updates/index.php
           cp deploy/cpanel/api/ci-credentials/index.php dist/cpanel/api/ci-credentials/index.php
-          cp deploy/cpanel/setup.php dist/cpanel/setup.php
+          cp deploy/cpanel/api/health/index.php dist/cpanel/api/health/index.php
+          cp deploy/cpanel/sql/schema.sql dist/cpanel/sql/schema.sql
           cp deploy/cpanel/INSTALL.txt dist/cpanel/INSTALL.txt
           cp dist/icons/rado-passenger.png dist/cpanel/assets/branding/rado-passenger.png
           cp dist/icons/rado-driver.png dist/cpanel/assets/branding/rado-driver.png
