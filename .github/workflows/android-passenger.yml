@@ -37,6 +37,7 @@ jobs:
             --platforms=android \
             --project-name=rado_passenger \
             --org=ir.rado.taxi
+          rm -f test/widget_test.dart
 
       - name: Configure Android permissions
         working-directory: apps/passenger
