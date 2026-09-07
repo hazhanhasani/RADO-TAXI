@@ -6,7 +6,6 @@ on:
     branches: [main]
     paths:
       - 'apps/passenger/**'
-      - 'assets/branding/**'
       - '.github/workflows/android-passenger.yml'
 
 permissions:
@@ -69,15 +68,24 @@ jobs:
           path.write_text(text)
           PY
 
+      - name: Fetch official RADO passenger icon
+        working-directory: apps/passenger
+        run: |
+          mkdir -p assets/branding
+          if [ ! -f assets/branding/rado-passenger.png ]; then
+            curl --fail --silent --show-error --location \
+              https://rado-taxi.sbs/assets/branding/rado-passenger.png \
+              --output assets/branding/rado-passenger.png
+          fi
+          test -s assets/branding/rado-passenger.png
+
       - name: Install dependencies
         working-directory: apps/passenger
         run: flutter pub get
 
       - name: Apply RADO passenger launcher icon
         working-directory: apps/passenger
-        run: |
-          test -f assets/branding/rado-passenger.png || (echo 'Missing RADO passenger icon asset' && exit 1)
-          dart run flutter_launcher_icons
+        run: dart run flutter_launcher_icons
 
       - name: Configure permanent release signing
         working-directory: apps/passenger
@@ -104,10 +112,9 @@ jobs:
           pre = '''val keystoreProperties = Properties()\nval keystorePropertiesFile = rootProject.file("key.properties")\nif (keystorePropertiesFile.exists()) {\n    keystoreProperties.load(FileInputStream(keystorePropertiesFile))\n}\n\n'''
           if 'val keystoreProperties = Properties()' not in s:
               s = s.replace(marker, pre + marker, 1)
-          android_marker = 'android {\n'
           signing = '''android {\n    signingConfigs {\n        create("release") {\n            keyAlias = keystoreProperties["keyAlias"] as String\n            keyPassword = keystoreProperties["keyPassword"] as String\n            storeFile = file(keystoreProperties["storeFile"] as String)\n            storePassword = keystoreProperties["storePassword"] as String\n        }\n    }\n'''
           if 'create("release")' not in s:
-              s = s.replace(android_marker, signing, 1)
+              s = s.replace('android {\n', signing, 1)
           s = s.replace('signingConfig = signingConfigs.getByName("debug")', 'signingConfig = signingConfigs.getByName("release")')
           p.write_text(s)
           PY
@@ -124,7 +131,7 @@ jobs:
         run: |
           flutter build apk --release \
             --dart-define=NESHAN_MAP_KEY="$NESHAN_MAP_KEY" \
-            --dart-define=RADO_API_BASE_URL="${RADO_API_BASE_URL:-https://rado-taxi.sbs/api/v1}"
+            --dart-define=RADO_API_BASE_URL="${RADO_API_BASE_URL:-https://rado-taxi.sbs}"
 
       - name: Rename APK
         run: cp apps/passenger/build/app/outputs/flutter-apk/app-release.apk RADO-Passenger-v0.2.1.apk
