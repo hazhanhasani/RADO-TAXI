@@ -20,4 +20,3 @@ OTP login, pickup/destination, fare estimate, driver online/offline, nearby disp
 
 ## Brand
 **RADO | رادو** — تاکسی اینترنتی بانه
-# RADO-TAXI

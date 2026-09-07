@@ -1,0 +1,17 @@
+name: Quality
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  structure:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate required project files
+        run: |
+          test -f README.md
+          test -f backend/database/schema.sql
+          test -f apps/passenger/pubspec.yaml
+          test -f apps/driver/pubspec.yaml
