@@ -1,4 +1,7 @@
 Options -Indexes
+<FilesMatch "^RADO-cPanel.*\.zip$">
+    Require all denied
+</FilesMatch>
 RewriteEngine On
 RewriteCond %{HTTP:Authorization} ^(.+)$
 RewriteRule .* - [E=HTTP_AUTHORIZATION:%1]
