@@ -6,11 +6,12 @@ on:
     branches: [main]
     paths:
       - 'apps/driver/**'
-      - 'scripts/configure_android_signing.py'
+      - 'scripts/**'
       - '.github/workflows/android-driver.yml'
 
 permissions:
   contents: read
+  id-token: write
 
 concurrency:
   group: rado-driver-${{ github.ref }}
@@ -31,68 +32,54 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Verify permanent signing secrets
-        env:
-          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: |
-          test -n "$KEYSTORE_B64" || (echo 'Missing ANDROID_KEYSTORE_BASE64' && exit 1)
-          test -n "$STORE_PASSWORD" || (echo 'Missing ANDROID_KEYSTORE_PASSWORD' && exit 1)
-          test -n "$KEY_ALIAS" || (echo 'Missing ANDROID_KEY_ALIAS' && exit 1)
-          test -n "$KEY_PASSWORD" || (echo 'Missing ANDROID_KEY_PASSWORD' && exit 1)
+      - name: Fetch permanent signing credentials from cPanel
+        id: credentials
+        continue-on-error: true
+        run: bash scripts/fetch_cpanel_ci_credentials.sh
+
+      - name: cPanel bootstrap notice
+        if: steps.credentials.outcome != 'success'
+        run: echo 'RADO cPanel secure bootstrap is not active yet; signed Driver build was skipped.'
 
       - name: Generate Android platform files
+        if: steps.credentials.outcome == 'success'
         working-directory: apps/driver
         run: |
-          flutter create . \
-            --platforms=android \
-            --project-name=rado_driver \
-            --org=ir.rado.taxi
+          flutter create . --platforms=android --project-name=rado_driver --org=ir.rado.taxi
           rm -f test/widget_test.dart
 
       - name: Configure Android permissions
+        if: steps.credentials.outcome == 'success'
         working-directory: apps/driver
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          path = Path('android/app/src/main/AndroidManifest.xml')
-          text = path.read_text()
-          marker = '<manifest xmlns:android="http://schemas.android.com/apk/res/android">'
-          permissions = '''<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-              <uses-permission android:name="android.permission.INTERNET"/>
-              <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
-              <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>'''
-          if 'android.permission.INTERNET' not in text:
-              text = text.replace(marker, permissions, 1)
+          path=Path('android/app/src/main/AndroidManifest.xml')
+          text=path.read_text()
+          marker='<manifest xmlns:android="http://schemas.android.com/apk/res/android">'
+          permissions='''<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n    <uses-permission android:name="android.permission.INTERNET"/>\n    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>'''
+          if 'android.permission.INTERNET' not in text: text=text.replace(marker,permissions,1)
           path.write_text(text)
           PY
 
       - name: Fetch official RADO driver icon
+        if: steps.credentials.outcome == 'success'
         working-directory: apps/driver
         run: |
           mkdir -p assets/branding
-          if [ ! -f assets/branding/rado-driver.png ]; then
-            curl --fail --silent --show-error --location \
-              https://rado-taxi.sbs/assets/branding/rado-driver.png \
-              --output assets/branding/rado-driver.png
-          fi
+          curl -fsSL https://rado-taxi.sbs/assets/branding/rado-driver.png -o assets/branding/rado-driver.png
           test -s assets/branding/rado-driver.png
 
-      - name: Install dependencies and icon
+      - name: Install dependencies and apply icon
+        if: steps.credentials.outcome == 'success'
         working-directory: apps/driver
         run: |
           flutter pub get
           dart run flutter_launcher_icons
 
       - name: Configure permanent release signing
+        if: steps.credentials.outcome == 'success'
         working-directory: apps/driver
-        env:
-          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           echo "$KEYSTORE_B64" | base64 --decode > android/app/rado-release.keystore
           cat > android/key.properties <<EOF
@@ -104,20 +91,24 @@ jobs:
           python3 ../../scripts/configure_android_signing.py android/app/build.gradle.kts
 
       - name: Analyze
+        if: steps.credentials.outcome == 'success'
         working-directory: apps/driver
         run: flutter analyze
 
       - name: Build permanently signed release APK
+        if: steps.credentials.outcome == 'success'
         working-directory: apps/driver
-        run: flutter build apk --release
+        run: flutter build apk --release --build-name=0.2.2 --build-number="$GITHUB_RUN_NUMBER"
 
       - name: Rename APK
-        run: cp apps/driver/build/app/outputs/flutter-apk/app-release.apk RADO-Driver-v0.2.1.apk
+        if: steps.credentials.outcome == 'success'
+        run: cp apps/driver/build/app/outputs/flutter-apk/app-release.apk "RADO-Driver-main-${GITHUB_RUN_NUMBER}.apk"
 
       - name: Upload APK artifact
+        if: steps.credentials.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
-          name: RADO-Driver-v0.2.1
-          path: RADO-Driver-v0.2.1.apk
+          name: RADO-Driver-main-${{ github.run_number }}
+          path: RADO-Driver-main-${{ github.run_number }}.apk
           if-no-files-found: error
           retention-days: 14
