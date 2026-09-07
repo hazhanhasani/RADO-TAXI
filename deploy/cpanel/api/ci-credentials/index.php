@@ -75,6 +75,7 @@ $allowedWorkflows = [
     $config['repo'] . '/.github/workflows/android-passenger.yml@',
     $config['repo'] . '/.github/workflows/android-driver.yml@',
     $config['repo'] . '/.github/workflows/release.yml@',
+    $config['repo'] . '/.github/workflows/first-release-build.yml@',
 ];
 $workflowAllowed = false;
 foreach ($allowedWorkflows as $prefix) {
