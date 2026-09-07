@@ -70,6 +70,17 @@ $ref = (string)($claims['ref'] ?? '');
 if (!($ref === 'refs/heads/main' || str_starts_with($ref, 'refs/tags/v'))) fail(403, 'ref not allowed');
 $event = (string)($claims['event_name'] ?? '');
 if (!in_array($event, ['push', 'workflow_dispatch'], true)) fail(403, 'event not allowed');
+$workflowRef = (string)($claims['workflow_ref'] ?? '');
+$allowedWorkflows = [
+    $config['repo'] . '/.github/workflows/android-passenger.yml@',
+    $config['repo'] . '/.github/workflows/android-driver.yml@',
+    $config['repo'] . '/.github/workflows/release.yml@',
+];
+$workflowAllowed = false;
+foreach ($allowedWorkflows as $prefix) {
+    if (str_starts_with($workflowRef, $prefix)) { $workflowAllowed = true; break; }
+}
+if (!$workflowAllowed) fail(403, 'workflow not allowed');
 
 $cacheDir = $root . '/rado-system/state';
 @mkdir($cacheDir, 0755, true);
