@@ -1,0 +1,6 @@
+Options -Indexes
+AddType application/vnd.android.package-archive .apk
+<IfModule mod_headers.c>
+  Header set X-Content-Type-Options "nosniff"
+  Header set Cache-Control "public, max-age=3600"
+</IfModule>
