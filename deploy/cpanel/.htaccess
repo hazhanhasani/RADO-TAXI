@@ -1,0 +1,4 @@
+Options -Indexes
+RewriteEngine On
+RewriteRule ^api/app-updates/(passenger|driver)/?$ api/app-updates/index.php?app=$1 [L,QSA]
+RewriteRule ^rado-system/ - [F,L]
