@@ -2,14 +2,25 @@ RADO cPanel package
 Domain: https://rado-taxi.sbs
 
 1) Extract this package into the document root of rado-taxi.sbs.
-2) Ensure PHP extensions cURL and ZipArchive are enabled.
-3) Add cron (adjust paths):
+2) Ensure PHP extensions cURL, OpenSSL and ZipArchive are enabled.
+3) Open https://rado-taxi.sbs/setup.php and configure the Neshan API Key.
+   - The secure bootstrap package can contain the permanent Android signing key.
+   - If it does not, upload RADO-ANDROID-PERMANENT-SIGNING.zip in setup.php.
+4) Delete setup.php after successful activation.
+5) Add cron (adjust paths):
    */5 * * * * /usr/local/bin/php /home/CPANEL_USER/public_html/rado-system/bin/rado-update.php >/dev/null 2>&1
-4) Run the updater once manually from cPanel Terminal or Cron.
-5) App update endpoints:
-   https://rado-taxi.sbs/api/app-updates/passenger
-   https://rado-taxi.sbs/api/app-updates/driver
-6) APKs are mirrored to:
-   https://rado-taxi.sbs/downloads/
+6) Run the updater once manually from cPanel Terminal or Cron.
 
-The updater preserves .env, storage and rado-system/state.
+Update chain:
+GitHub Release -> cPanel updater -> https://rado-taxi.sbs/downloads/ -> Passenger/Driver apps
+
+App update endpoints:
+https://rado-taxi.sbs/api/app-updates/passenger
+https://rado-taxi.sbs/api/app-updates/driver
+
+CI signing broker:
+https://rado-taxi.sbs/api/ci-credentials/
+Only GitHub Actions OIDC tokens issued for hazhanhasani/RADO-TAXI on main or v* tags are accepted.
+
+The updater preserves .env, storage, rado-system/state and rado-system/private.
+Never commit the keystore, signing passwords or Neshan API key to the public repository.
