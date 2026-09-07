@@ -6,6 +6,7 @@ on:
     branches: [main]
     paths:
       - 'apps/passenger/**'
+      - 'assets/branding/**'
       - '.github/workflows/android-passenger.yml'
 
 permissions:
@@ -30,6 +31,18 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Verify permanent signing secrets
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          test -n "$KEYSTORE_B64" || (echo 'Missing ANDROID_KEYSTORE_BASE64' && exit 1)
+          test -n "$STORE_PASSWORD" || (echo 'Missing ANDROID_KEYSTORE_PASSWORD' && exit 1)
+          test -n "$KEY_ALIAS" || (echo 'Missing ANDROID_KEY_ALIAS' && exit 1)
+          test -n "$KEY_PASSWORD" || (echo 'Missing ANDROID_KEY_PASSWORD' && exit 1)
+
       - name: Generate Android platform files
         working-directory: apps/passenger
         run: |
@@ -39,12 +52,11 @@ jobs:
             --org=ir.rado.taxi
           rm -f test/widget_test.dart
 
-      - name: Configure Android permissions
+      - name: Configure Android runtime permissions
         working-directory: apps/passenger
         run: |
           python3 - <<'PY'
           from pathlib import Path
-
           path = Path('android/app/src/main/AndroidManifest.xml')
           text = path.read_text()
           marker = '<manifest xmlns:android="http://schemas.android.com/apk/res/android">'
@@ -52,10 +64,8 @@ jobs:
               <uses-permission android:name="android.permission.INTERNET"/>
               <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
               <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>'''
-
           if 'android.permission.INTERNET' not in text:
               text = text.replace(marker, permissions, 1)
-
           path.write_text(text)
           PY
 
@@ -63,11 +73,50 @@ jobs:
         working-directory: apps/passenger
         run: flutter pub get
 
+      - name: Apply RADO passenger launcher icon
+        working-directory: apps/passenger
+        run: |
+          test -f assets/branding/rado-passenger.png || (echo 'Missing RADO passenger icon asset' && exit 1)
+          dart run flutter_launcher_icons
+
+      - name: Configure permanent release signing
+        working-directory: apps/passenger
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          echo "$KEYSTORE_B64" | base64 --decode > android/app/rado-release.keystore
+          cat > android/key.properties <<EOF
+          storePassword=$STORE_PASSWORD
+          keyPassword=$KEY_PASSWORD
+          keyAlias=$KEY_ALIAS
+          storeFile=rado-release.keystore
+          EOF
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('android/app/build.gradle.kts')
+          s = p.read_text()
+          if 'java.util.Properties' not in s:
+              s = 'import java.util.Properties\nimport java.io.FileInputStream\n\n' + s
+          marker = 'android {'
+          pre = '''val keystoreProperties = Properties()\nval keystorePropertiesFile = rootProject.file("key.properties")\nif (keystorePropertiesFile.exists()) {\n    keystoreProperties.load(FileInputStream(keystorePropertiesFile))\n}\n\n'''
+          if 'val keystoreProperties = Properties()' not in s:
+              s = s.replace(marker, pre + marker, 1)
+          android_marker = 'android {\n'
+          signing = '''android {\n    signingConfigs {\n        create("release") {\n            keyAlias = keystoreProperties["keyAlias"] as String\n            keyPassword = keystoreProperties["keyPassword"] as String\n            storeFile = file(keystoreProperties["storeFile"] as String)\n            storePassword = keystoreProperties["storePassword"] as String\n        }\n    }\n'''
+          if 'create("release")' not in s:
+              s = s.replace(android_marker, signing, 1)
+          s = s.replace('signingConfig = signingConfigs.getByName("debug")', 'signingConfig = signingConfigs.getByName("release")')
+          p.write_text(s)
+          PY
+
       - name: Analyze
         working-directory: apps/passenger
         run: flutter analyze
 
-      - name: Build release APK
+      - name: Build permanently signed release APK
         working-directory: apps/passenger
         env:
           NESHAN_MAP_KEY: ${{ secrets.NESHAN_MAP_KEY }}
@@ -75,15 +124,15 @@ jobs:
         run: |
           flutter build apk --release \
             --dart-define=NESHAN_MAP_KEY="$NESHAN_MAP_KEY" \
-            --dart-define=RADO_API_BASE_URL="$RADO_API_BASE_URL"
+            --dart-define=RADO_API_BASE_URL="${RADO_API_BASE_URL:-https://rado-taxi.sbs/api/v1}"
 
       - name: Rename APK
-        run: cp apps/passenger/build/app/outputs/flutter-apk/app-release.apk RADO-Passenger-v0.2.0.apk
+        run: cp apps/passenger/build/app/outputs/flutter-apk/app-release.apk RADO-Passenger-v0.2.1.apk
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: RADO-Passenger-v0.2.0
-          path: RADO-Passenger-v0.2.0.apk
+          name: RADO-Passenger-v0.2.1
+          path: RADO-Passenger-v0.2.1.apk
           if-no-files-found: error
           retention-days: 14
