@@ -1,0 +1,27 @@
+{
+  "release": "0.2.1",
+  "published_at": "2026-09-08T00:00:00Z",
+  "apps": {
+    "passenger": {
+      "version": "0.2.1",
+      "version_code": 3,
+      "minimum_supported_code": 2,
+      "mandatory": false,
+      "asset": "RADO-Passenger-v0.2.1.apk",
+      "sha256": ""
+    },
+    "driver": {
+      "version": "0.2.1",
+      "version_code": 3,
+      "minimum_supported_code": 1,
+      "mandatory": false,
+      "asset": "RADO-Driver-v0.2.1.apk",
+      "sha256": ""
+    }
+  },
+  "cpanel": {
+    "version": "0.2.1",
+    "asset": "RADO-cPanel-v0.2.1.zip",
+    "sha256": ""
+  }
+}
