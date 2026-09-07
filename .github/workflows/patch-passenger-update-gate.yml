@@ -1,0 +1,40 @@
+name: Wire Passenger Update Gate
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/patch-passenger-update-gate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Wire update gate
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('apps/passenger/lib/main.dart')
+          s = p.read_text()
+          if "import 'app_update.dart';" not in s:
+              s = s.replace("import 'package:neshan_maps_flutter/map.dart';\n", "import 'package:neshan_maps_flutter/map.dart';\nimport 'app_update.dart';\n", 1)
+          old = "void main() => runApp(const RadoPassengerApp());"
+          new = "void main() => runApp(const RadoUpdateGate(app: 'passenger', child: RadoPassengerApp()));"
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+          PY
+      - name: Commit patch
+        run: |
+          if git diff --quiet; then exit 0; fi
+          git config user.name 'RADO Build Bot'
+          git config user.email 'actions@users.noreply.github.com'
+          git add apps/passenger/lib/main.dart
+          git commit -m 'feat(passenger): check app updates from cPanel'
+          git push origin main
