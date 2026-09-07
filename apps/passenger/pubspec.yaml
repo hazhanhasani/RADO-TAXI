@@ -15,5 +15,10 @@ dependencies:
   latlong2: ^0.10.1
   neshan_maps_flutter: ^1.1.0
 
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
 flutter:
   uses-material-design: true
