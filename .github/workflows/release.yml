@@ -125,6 +125,7 @@ jobs:
           rm -rf dist/cpanel
           mkdir -p dist/cpanel/rado-system/bin dist/cpanel/rado-system/state dist/cpanel/downloads dist/cpanel/assets/branding dist/cpanel/api/app-updates
           cp deploy/cpanel/.htaccess dist/cpanel/.htaccess
+          cp deploy/cpanel/downloads/.htaccess dist/cpanel/downloads/.htaccess
           cp deploy/cpanel/config.php dist/cpanel/rado-system/config.php
           cp deploy/cpanel/bin/rado-update.php dist/cpanel/rado-system/bin/rado-update.php
           cp deploy/cpanel/api/app-updates/index.php dist/cpanel/api/app-updates/index.php
