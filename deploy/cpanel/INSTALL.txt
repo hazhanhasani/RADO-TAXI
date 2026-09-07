@@ -1,15 +1,17 @@
-RADO cPanel package
+RADO cPanel FIRST INSTALL
 Domain: https://rado-taxi.sbs
 
-1) Extract this package into the document root of rado-taxi.sbs.
-2) Ensure PHP extensions cURL, OpenSSL and ZipArchive are enabled.
-3) Open https://rado-taxi.sbs/setup.php and configure the Neshan API Key.
-   - The secure bootstrap package can contain the permanent Android signing key.
-   - If it does not, upload RADO-ANDROID-PERMANENT-SIGNING.zip in setup.php.
-4) Delete setup.php after successful activation.
-5) Add cron (adjust paths):
+1) In cPanel create one MySQL/MariaDB database and assign a database user with ALL PRIVILEGES.
+2) Extract the RADO First Install ZIP directly into the document root of rado-taxi.sbs.
+3) Open https://rado-taxi.sbs/ . The root page automatically redirects to the quick installer.
+4) The installer checks PHP and extensions, connects to MySQL/MariaDB, creates all required tables, creates the first admin, saves the Neshan API key, and activates permanent Android signing.
+5) Required PHP features: PHP 8.1+, PDO MySQL, cURL, OpenSSL, ZipArchive.
+6) After installation add this Cron Job (adjust the account path shown by the installer):
    */5 * * * * /usr/local/bin/php /home/CPANEL_USER/public_html/rado-system/bin/rado-update.php >/dev/null 2>&1
-6) Run the updater once manually from cPanel Terminal or Cron.
+7) Run the updater once after the first production GitHub Release exists.
+
+Health endpoint:
+https://rado-taxi.sbs/api/health/
 
 Update chain:
 GitHub Release -> cPanel updater -> https://rado-taxi.sbs/downloads/ -> Passenger/Driver apps
@@ -20,7 +22,7 @@ https://rado-taxi.sbs/api/app-updates/driver
 
 CI signing broker:
 https://rado-taxi.sbs/api/ci-credentials/
-Only GitHub Actions OIDC tokens issued for hazhanhasani/RADO-TAXI on main or v* tags are accepted.
+Only GitHub Actions OIDC tokens issued for hazhanhasani/RADO-TAXI and approved RADO build workflows are accepted.
 
 The updater preserves .env, storage, rado-system/state and rado-system/private.
-Never commit the keystore, signing passwords or Neshan API key to the public repository.
+Never commit the keystore, signing passwords, database credentials or Neshan API key to the public repository.
