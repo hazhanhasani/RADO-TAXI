@@ -1,17 +1,19 @@
 name: rado_passenger
-description: RADO Passenger app
+description: RADO Passenger - ride hailing app for Baneh
 publish_to: none
-version: 0.1.0+1
+version: 0.2.0+2
+
 environment:
-  sdk: '>=3.5.0 <4.0.0'
+  sdk: '>=3.10.0 <4.0.0'
+
 dependencies:
   flutter:
     sdk: flutter
-  dio: ^5.7.0
-  flutter_riverpod: ^2.6.1
-  go_router: ^14.6.2
-  geolocator: ^13.0.2
-  flutter_map: ^7.0.2
+  cupertino_icons: ^1.0.8
+  dio: ^5.8.0+1
+  geolocator: ^14.0.2
   latlong2: ^0.9.1
+  neshan_maps_flutter: ^1.1.0
+
 flutter:
   uses-material-design: true
