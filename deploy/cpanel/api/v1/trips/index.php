@@ -68,6 +68,9 @@ try {
             'status'=>'searching',
             'estimated_fare'=>(int)$breakdown['fare'],
             'currency'=>'IRR',
+            'requested_at'=>rado_jalali_datetime(null, true),
+            'requested_at_long'=>rado_jalali_long(),
+            'timezone'=>'Asia/Tehran',
             'drivers_notified'=>$notified,
         ],
     ]);
