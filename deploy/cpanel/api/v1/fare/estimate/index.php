@@ -11,7 +11,11 @@ try {
     $distance = filter_var($body['distance_meters'] ?? null, FILTER_VALIDATE_INT);
     $duration = filter_var($body['duration_seconds'] ?? null, FILTER_VALIDATE_INT);
     if ($distance === false || $duration === false || $distance < 0 || $duration < 0) {
-        rado_json(422, ['ok' => false, 'error' => 'invalid_route_metrics']);
+        rado_json(422, [
+            'ok' => false,
+            'error' => 'invalid_route_metrics',
+            'message' => 'اطلاعات مسافت یا زمان مسیر معتبر نیست.',
+        ]);
     }
 
     $pdo = rado_db();
@@ -39,5 +43,33 @@ try {
         'breakdown' => $breakdown,
     ]);
 } catch (Throwable $e) {
-    rado_json(500, ['ok' => false, 'error' => 'fare_estimate_failed']);
+    $stateDir = rado_root() . '/rado-system/state';
+    @mkdir($stateDir, 0755, true);
+    $requestId = substr(bin2hex(random_bytes(8)), 0, 12);
+    @file_put_contents(
+        $stateDir . '/fare-errors.log',
+        '[' . rado_jalali_datetime(null, true) . '] ' . $requestId . ' ' . get_class($e) . ': ' . $e->getMessage() . "\n",
+        FILE_APPEND | LOCK_EX
+    );
+
+    $message = 'محاسبه کرایه روی سرور RADO انجام نشد. دیتابیس یا ساختار تعرفه نیاز به بررسی دارد.';
+    $error = 'fare_estimate_failed';
+    $status = 500;
+
+    if ($e instanceof PDOException) {
+        $error = 'database_unavailable';
+        $status = 503;
+        $message = 'دیتابیس RADO در دسترس نیست یا ساختار آن کامل نشده است. بروزرسانی خودکار سرور باید آن را اصلاح کند.';
+    } elseif ($e instanceof RuntimeException && $e->getMessage() === 'database_not_configured') {
+        $error = 'database_not_configured';
+        $status = 503;
+        $message = 'اتصال دیتابیس RADO روی هاست هنوز کامل نشده است.';
+    }
+
+    rado_json($status, [
+        'ok' => false,
+        'error' => $error,
+        'message' => $message,
+        'request_id' => $requestId,
+    ]);
 }
