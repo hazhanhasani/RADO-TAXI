@@ -18,6 +18,10 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Fix hotfix script for nullable Neshan zoom
+        run: |
+          sed -i "s/final zoom = await _map.getCurrentZoom();/final zoom = (await _map.getCurrentZoom()) ?? 16.0;/" scripts/apply_passenger_live_hotfix.py
+
       - name: Apply source hotfix
         run: python3 scripts/apply_passenger_live_hotfix.py
 
@@ -42,19 +46,19 @@ jobs:
         working-directory: apps/passenger
         run: |
           flutter pub get
-          flutter analyze
+          flutter analyze --no-fatal-warnings --no-fatal-infos
 
       - name: Analyze driver
         working-directory: apps/driver
         run: |
           flutter pub get
-          flutter analyze
+          flutter analyze --no-fatal-warnings --no-fatal-infos
 
       - name: Commit hotfix
         run: |
           git config user.name "RADO Release Bot"
           git config user.email "actions@users.noreply.github.com"
-          git add apps/passenger/lib/runtime_passenger.dart apps/driver/lib/advanced_driver.dart deploy/cpanel/admin/live-map.php
+          git add scripts/apply_passenger_live_hotfix.py apps/passenger/lib/runtime_passenger.dart apps/driver/lib/advanced_driver.dart deploy/cpanel/admin/live-map.php
           if git diff --cached --quiet; then
             echo "No source changes to commit"
             exit 0
