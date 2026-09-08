@@ -1,0 +1,86 @@
+name: Apply Realtime Dispatch
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.maintenance/APPLY_REALTIME_DISPATCH'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: rado-realtime-dispatch-source-patch
+  cancel-in-progress: false
+
+jobs:
+  patch-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Apply deterministic realtime dispatch patch
+        run: python3 scripts/apply_realtime_dispatch.py
+
+      - name: Format Dart sources
+        run: |
+          dart format \
+            apps/passenger/lib/runtime_passenger.dart \
+            apps/passenger/lib/realtime_stream.dart \
+            apps/driver/lib/advanced_driver.dart \
+            apps/driver/lib/realtime_stream.dart
+
+      - name: Validate patch shape and PHP
+        run: |
+          set -euo pipefail
+          grep -q "RadoRealtimeStream" apps/passenger/lib/runtime_passenger.dart
+          grep -q "Duration(seconds: 20)" apps/passenger/lib/runtime_passenger.dart
+          grep -q "driver_location" apps/passenger/lib/runtime_passenger.dart
+          grep -q "RadoRealtimeStream" apps/driver/lib/advanced_driver.dart
+          grep -q "SegmentedButton<bool>" apps/driver/lib/advanced_driver.dart
+          grep -q "حالت انتخاب مسافر" apps/driver/lib/advanced_driver.dart
+          grep -q "Duration(seconds: 2)" apps/driver/lib/advanced_driver.dart
+          grep -q "trip_assigned" deploy/cpanel/rado-system/lib/platform.php
+          php -l deploy/cpanel/rado-system/lib/platform.php
+          php -l deploy/cpanel/api/v1/realtime/index.php
+          php -l deploy/cpanel/api/v1/driver/presence/index.php
+          php -l deploy/cpanel/admin/live-stream.php
+          php -l deploy/cpanel/admin/live-map.php
+          git diff --check
+
+      - name: Analyze passenger app
+        working-directory: apps/passenger
+        run: |
+          flutter pub get
+          flutter analyze
+
+      - name: Analyze driver app
+        working-directory: apps/driver
+        run: |
+          flutter pub get
+          flutter analyze
+
+      - name: Commit validated realtime dispatch sources
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            apps/passenger/lib/runtime_passenger.dart \
+            apps/passenger/lib/realtime_stream.dart \
+            apps/driver/lib/advanced_driver.dart \
+            apps/driver/lib/realtime_stream.dart \
+            deploy/cpanel/rado-system/lib/platform.php
+          if git diff --cached --quiet; then
+            echo "Realtime dispatch sources already patched"
+            exit 0
+          fi
+          git commit -m "feat(realtime): live dispatch passenger and driver streams"
+          git push origin HEAD:main
