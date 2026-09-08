@@ -21,4 +21,16 @@ s = s.replace(
     'signingConfig = signingConfigs.getByName("debug")',
     'signingConfig = signingConfigs.getByName("release")',
 )
+
+# flutter_local_notifications 10+ requires Java core-library desugaring on Android.
+if 'isCoreLibraryDesugaringEnabled = true' not in s:
+    marker = 'compileOptions {\n'
+    if marker in s:
+        s = s.replace(marker, marker + '        isCoreLibraryDesugaringEnabled = true\n', 1)
+    else:
+        s = s.replace('android {\n', 'android {\n    compileOptions {\n        isCoreLibraryDesugaringEnabled = true\n        sourceCompatibility = JavaVersion.VERSION_11\n        targetCompatibility = JavaVersion.VERSION_11\n    }\n', 1)
+
+if 'coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")' not in s:
+    s += '''\n\ndependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")\n}\n'''
+
 p.write_text(s)
