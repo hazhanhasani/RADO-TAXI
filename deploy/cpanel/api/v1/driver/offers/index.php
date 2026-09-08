@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 require dirname(__DIR__, 4) . '/rado-system/lib/app.php';
+require_once dirname(__DIR__, 4) . '/rado-system/lib/platform.php';
 
 try {
     $pdo = rado_db();
@@ -15,13 +16,9 @@ try {
         $presence = $presenceStmt->fetch();
         if (is_array($presence) && (int)$presence['is_online'] === 1) {
             if ($presence['latitude'] !== null && $presence['longitude'] !== null) {
-                rado_offer_waiting_trip_to_driver($pdo, $driverId, (float)$presence['latitude'], (float)$presence['longitude']);
+                rado_offer_waiting_trip_to_driver_v2($pdo, $driverId, (float)$presence['latitude'], (float)$presence['longitude']);
             } else {
-                $waiting = $pdo->query("SELECT id FROM trips WHERE status='searching' AND requested_at>=DATE_SUB(NOW(),INTERVAL 10 MINUTE) ORDER BY requested_at ASC LIMIT 1")->fetchColumn();
-                if ($waiting !== false) {
-                    $insert = $pdo->prepare('INSERT IGNORE INTO trip_offers(trip_id,driver_id,offered_at,expires_at) VALUES(?,?,NOW(),DATE_ADD(NOW(),INTERVAL 25 SECOND))');
-                    $insert->execute([(string)$waiting,$driverId]);
-                }
+                rado_reoffer_expired_to_driver_v2($pdo, $driverId);
             }
         }
 
@@ -46,6 +43,8 @@ try {
             'ok'=>true,
             'offers'=>$offers,
             'active_trip'=>$activeTrip ? rado_trip_payload($activeTrip) : null,
+            'online'=>is_array($presence) && (int)$presence['is_online'] === 1,
+            'last_seen'=>is_array($presence) && !empty($presence['last_seen_at']) ? rado_time_payload((string)$presence['last_seen_at']) : null,
             'server_time'=>rado_time_payload(),
         ]);
     }
@@ -118,6 +117,7 @@ try {
     $stmt->execute([$tripId,$offerId]);
     $pdo->commit();
 
+    rado_platform_event($pdo,'trip:'.$tripId,'driver_assigned',['driver_id'=>$driverId,'auto'=>false]);
     $row = rado_trip_row($pdo, $tripId);
     rado_json(200, [
         'ok'=>true,
@@ -127,5 +127,7 @@ try {
     ]);
 } catch (Throwable $e) {
     if (isset($pdo) && $pdo instanceof PDO && $pdo->inTransaction()) $pdo->rollBack();
-    rado_json(500, ['ok'=>false,'error'=>'driver_offers_failed']);
+    $id=substr(bin2hex(random_bytes(8)),0,12);
+    try{$dir=rado_root().'/rado-system/state';@mkdir($dir,0755,true);@file_put_contents($dir.'/driver-offers-errors.log','['.rado_jalali_datetime(null,true).'] '.$id.' '.$e->getMessage()."\n",FILE_APPEND|LOCK_EX);}catch(Throwable){}
+    rado_json(500, ['ok'=>false,'error'=>'driver_offers_failed','request_id'=>$id]);
 }
