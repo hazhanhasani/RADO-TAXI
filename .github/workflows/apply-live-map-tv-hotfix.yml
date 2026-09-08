@@ -1,0 +1,50 @@
+name: Apply Live Map TV Hotfix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.maintenance/APPLY_LIVE_MAP_TV_HOTFIX'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply hotfix
+        run: python3 scripts/apply_live_map_tv_hotfix.py
+
+      - name: PHP lint
+        run: |
+          php -l deploy/cpanel/admin/_ui.php
+          php -l deploy/cpanel/admin/live-map.php
+          php -l deploy/cpanel/admin/maps.php
+          php -l deploy/cpanel/api/v1/maps/config/index.php
+
+      - name: Verify live nav and resilient loader
+        run: |
+          grep -F "'live'=>['زنده','/admin/live-map.php','●']" deploy/cpanel/admin/_ui.php
+          grep -F "ra_header('مرکز عملیات زنده RADO','live'" deploy/cpanel/admin/live-map.php
+          grep -F "loadNeshanSdk" deploy/cpanel/admin/live-map.php
+          grep -F "unpkg.com/@neshan-maps-platform/maplibre-sdk@5.24.4" deploy/cpanel/admin/live-map.php
+          grep -F "mapLoadTimer=setTimeout" deploy/cpanel/admin/live-map.php
+          grep -F "legacy_key" deploy/cpanel/api/v1/maps/config/index.php
+
+      - name: Commit hotfix
+        run: |
+          if git diff --quiet; then
+            echo 'No changes to commit.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add deploy/cpanel/admin/_ui.php deploy/cpanel/admin/live-map.php deploy/cpanel/admin/maps.php deploy/cpanel/api/v1/maps/config/index.php
+          git commit -m 'fix(live-map): repair TV mode and Neshan loading'
+          git push origin HEAD:main
