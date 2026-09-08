@@ -30,7 +30,7 @@ function radoUpdaterHttpGet(string $url, array $config): string {
     return (string)$body;
 }
 
-function radoUpdaterDownload(string $url, string $dest, array $config): void {
+function radoUpdaterDownload(string $url, string $dest, array $config, int $timeout = 180): void {
     $fp = fopen($dest, 'wb');
     if (!$fp) throw new RuntimeException("Cannot write $dest");
     $ch = curl_init($url);
@@ -38,7 +38,7 @@ function radoUpdaterDownload(string $url, string $dest, array $config): void {
         CURLOPT_FILE => $fp,
         CURLOPT_FOLLOWLOCATION => true,
         CURLOPT_CONNECTTIMEOUT => 10,
-        CURLOPT_TIMEOUT => 180,
+        CURLOPT_TIMEOUT => $timeout,
         CURLOPT_HTTPHEADER => ['User-Agent: ' . $config['user_agent']],
     ]);
     $ok = curl_exec($ch);
@@ -72,93 +72,118 @@ function radoUpdaterRemoveTree(string $path): void {
     @rmdir($path);
 }
 
-try {
-    file_put_contents($stateDir . '/update_status', "checking\n");
-    $repo = $config['repo'];
-    $release = json_decode(radoUpdaterHttpGet($config['github_api'] . "/repos/$repo/releases/latest", $config), true, 512, JSON_THROW_ON_ERROR);
-    $tag = (string)($release['tag_name'] ?? '');
-    if ($tag === '') throw new RuntimeException('Latest GitHub release has no tag');
-    file_put_contents($stateDir . '/target_tag', $tag . "\n");
+function radoUpdaterInstallCore(string $root, string $stateDir, array $config, array $assets, array $meta, string $tag): void {
+    if (empty($meta['cpanel']['asset'])) return;
+    file_put_contents($stateDir . '/update_status', "installing\n", LOCK_EX);
+    $cpName = basename((string)$meta['cpanel']['asset']);
+    $cpAsset = radoUpdaterAsset($assets, $cpName);
+    if (!$cpAsset) throw new RuntimeException("Missing cPanel asset: $cpName");
 
-    $current = is_file($stateDir . '/current_tag') ? trim((string)file_get_contents($stateDir . '/current_tag')) : '';
-    $assets = $release['assets'] ?? [];
-    $metaAsset = radoUpdaterAsset($assets, 'RADO-release.json');
-    if (!$metaAsset) throw new RuntimeException('RADO-release.json missing from GitHub release');
-
-    $tmpMeta = tempnam(sys_get_temp_dir(), 'rado-meta-');
-    radoUpdaterDownload($metaAsset['browser_download_url'], $tmpMeta, $config);
-    $meta = json_decode((string)file_get_contents($tmpMeta), true, 512, JSON_THROW_ON_ERROR);
-    @unlink($tmpMeta);
-
-    foreach (['passenger', 'driver'] as $app) {
-        $assetName = (string)($meta['apps'][$app]['asset'] ?? '');
-        if ($assetName === '') continue;
-        $asset = radoUpdaterAsset($assets, $assetName);
-        if (!$asset) throw new RuntimeException("Missing release asset: $assetName");
-        $dest = $root . '/downloads/' . basename($assetName);
-        $expected = (string)($meta['apps'][$app]['sha256'] ?? '');
-        if (!is_file($dest) || ($expected !== '' && hash_file('sha256', $dest) !== $expected)) {
-            $tmp = $dest . '.tmp';
-            radoUpdaterDownload($asset['browser_download_url'], $tmp, $config);
-            if ($expected !== '' && hash_file('sha256', $tmp) !== $expected) {
-                @unlink($tmp);
-                throw new RuntimeException("SHA256 mismatch for $assetName");
-            }
-            rename($tmp, $dest);
-        }
-    }
-
-    if ($current !== $tag && !empty($meta['cpanel']['asset'])) {
-        file_put_contents($stateDir . '/update_status', "installing\n");
-        $cpName = basename((string)$meta['cpanel']['asset']);
-        $cpAsset = radoUpdaterAsset($assets, $cpName);
-        if (!$cpAsset) throw new RuntimeException("Missing cPanel asset: $cpName");
-
-        $tmpZip = tempnam(sys_get_temp_dir(), 'rado-cp-');
-        radoUpdaterDownload($cpAsset['browser_download_url'], $tmpZip, $config);
-        $expected = (string)($meta['cpanel']['sha256'] ?? '');
-        if ($expected !== '' && hash_file('sha256', $tmpZip) !== $expected) {
-            @unlink($tmpZip);
-            throw new RuntimeException('cPanel SHA256 mismatch');
-        }
-
-        $zip = new ZipArchive();
-        if ($zip->open($tmpZip) !== true) throw new RuntimeException('Cannot open cPanel ZIP');
-        $tmpDir = sys_get_temp_dir() . '/rado-extract-' . bin2hex(random_bytes(6));
-        if (!mkdir($tmpDir, 0755, true) && !is_dir($tmpDir)) throw new RuntimeException('Cannot create extraction directory');
-        if (!$zip->extractTo($tmpDir)) throw new RuntimeException('Cannot extract cPanel ZIP');
-        $zip->close();
+    $tmpZip = tempnam(sys_get_temp_dir(), 'rado-cp-');
+    radoUpdaterDownload((string)$cpAsset['browser_download_url'], $tmpZip, $config, 120);
+    $expected = (string)($meta['cpanel']['sha256'] ?? '');
+    if ($expected !== '' && hash_file('sha256', $tmpZip) !== $expected) {
         @unlink($tmpZip);
-
-        foreach (['index.php', 'rado-system/lib/app.php', 'rado-system/lib/migrate.php', 'rado-system/lib/tick.php', 'rado-system/bin/rado-migrate.php', 'rado-system/bin/rado-update.php'] as $required) {
-            if (!is_file($tmpDir . '/' . $required)) throw new RuntimeException("Invalid cPanel package, missing: $required");
-        }
-
-        $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($tmpDir, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::SELF_FIRST);
-        foreach ($it as $item) {
-            $rel = substr($item->getPathname(), strlen($tmpDir) + 1);
-            if (radoUpdaterPreserve($rel, $config)) continue;
-            $dest = $root . '/' . $rel;
-            if ($item->isDir()) {
-                @mkdir($dest, 0755, true);
-            } else {
-                @mkdir(dirname($dest), 0755, true);
-                if (!copy($item->getPathname(), $dest)) throw new RuntimeException("Cannot install file: $rel");
-            }
-        }
-        radoUpdaterRemoveTree($tmpDir);
-
-        // Shared-hosting safe: never depend on exec/shell_exec/proc_open.
-        require_once $root . '/rado-system/lib/migrate.php';
-        rado_run_database_migrations($root);
+        throw new RuntimeException('cPanel SHA256 mismatch');
     }
+
+    $zip = new ZipArchive();
+    if ($zip->open($tmpZip) !== true) throw new RuntimeException('Cannot open cPanel ZIP');
+    $tmpDir = sys_get_temp_dir() . '/rado-extract-' . bin2hex(random_bytes(6));
+    if (!mkdir($tmpDir, 0755, true) && !is_dir($tmpDir)) throw new RuntimeException('Cannot create extraction directory');
+    if (!$zip->extractTo($tmpDir)) throw new RuntimeException('Cannot extract cPanel ZIP');
+    $zip->close();
+    @unlink($tmpZip);
+
+    foreach (['index.php','rado-system/lib/app.php','rado-system/lib/migrate.php','rado-system/lib/tick.php','rado-system/bin/rado-migrate.php','rado-system/bin/rado-update.php'] as $required) {
+        if (!is_file($tmpDir . '/' . $required)) throw new RuntimeException("Invalid cPanel package, missing: $required");
+    }
+
+    $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($tmpDir, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::SELF_FIRST);
+    foreach ($it as $item) {
+        $rel = substr($item->getPathname(), strlen($tmpDir) + 1);
+        if (radoUpdaterPreserve($rel, $config)) continue;
+        $dest = $root . '/' . $rel;
+        if ($item->isDir()) {
+            @mkdir($dest, 0755, true);
+        } else {
+            @mkdir(dirname($dest), 0755, true);
+            if (!copy($item->getPathname(), $dest)) throw new RuntimeException("Cannot install file: $rel");
+        }
+    }
+    radoUpdaterRemoveTree($tmpDir);
+
+    require_once $root . '/rado-system/lib/migrate.php';
+    rado_run_database_migrations($root);
 
     $tmpState = $stateDir . '/release.json.tmp';
     file_put_contents($tmpState, json_encode($meta, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT), LOCK_EX);
     rename($tmpState, $stateDir . '/release.json');
     file_put_contents($stateDir . '/current_tag', $tag . "\n", LOCK_EX);
+    file_put_contents($stateDir . '/target_tag', $tag . "\n", LOCK_EX);
+    file_put_contents($stateDir . '/update_status', "core_ok\n", LOCK_EX);
+}
 
-    // Run operational tick in the same PHP process; failures do not block deployment.
+function radoUpdaterMirrorApps(string $root, string $stateDir, array $config, array $assets, array $meta): void {
+    $errors = [];
+    foreach (['passenger', 'driver'] as $app) {
+        try {
+            $assetName = (string)($meta['apps'][$app]['asset'] ?? '');
+            if ($assetName === '') continue;
+            $asset = radoUpdaterAsset($assets, $assetName);
+            if (!$asset) throw new RuntimeException("Missing release asset: $assetName");
+            $dest = $root . '/downloads/' . basename($assetName);
+            $expected = (string)($meta['apps'][$app]['sha256'] ?? '');
+            if (is_file($dest) && ($expected === '' || hash_file('sha256', $dest) === $expected)) continue;
+            $tmp = $dest . '.tmp';
+            radoUpdaterDownload((string)$asset['browser_download_url'], $tmp, $config, 300);
+            if ($expected !== '' && hash_file('sha256', $tmp) !== $expected) {
+                @unlink($tmp);
+                throw new RuntimeException("SHA256 mismatch for $assetName");
+            }
+            if (!rename($tmp, $dest)) throw new RuntimeException("Cannot publish mirrored APK: $assetName");
+        } catch (Throwable $e) {
+            $errors[] = $app . ': ' . $e->getMessage();
+        }
+    }
+    if ($errors) {
+        file_put_contents($stateDir . '/mirror_errors.log', '[' . rado_jalali_datetime(null, true) . '] ' . implode(' | ', $errors) . "\n", FILE_APPEND | LOCK_EX);
+        file_put_contents($stateDir . '/mirror_status', "partial\n", LOCK_EX);
+    } else {
+        @unlink($stateDir . '/mirror_errors.log');
+        file_put_contents($stateDir . '/mirror_status', "ok\n", LOCK_EX);
+    }
+}
+
+try {
+    file_put_contents($stateDir . '/update_status', "checking\n", LOCK_EX);
+    $repo = $config['repo'];
+    $release = json_decode(radoUpdaterHttpGet($config['github_api'] . "/repos/$repo/releases/latest", $config), true, 512, JSON_THROW_ON_ERROR);
+    $tag = (string)($release['tag_name'] ?? '');
+    if ($tag === '') throw new RuntimeException('Latest GitHub release has no tag');
+    file_put_contents($stateDir . '/target_tag', $tag . "\n", LOCK_EX);
+
+    $current = is_file($stateDir . '/current_tag') ? trim((string)file_get_contents($stateDir . '/current_tag')) : '';
+    $assets = is_array($release['assets'] ?? null) ? $release['assets'] : [];
+    $metaAsset = radoUpdaterAsset($assets, 'RADO-release.json');
+    if (!$metaAsset) throw new RuntimeException('RADO-release.json missing from GitHub release');
+
+    $tmpMeta = tempnam(sys_get_temp_dir(), 'rado-meta-');
+    radoUpdaterDownload((string)$metaAsset['browser_download_url'], $tmpMeta, $config, 60);
+    $meta = json_decode((string)file_get_contents($tmpMeta), true, 512, JSON_THROW_ON_ERROR);
+    @unlink($tmpMeta);
+
+    // Critical fix: install the tiny cPanel core first. Large APK mirroring must never block deployment.
+    if ($current !== $tag) radoUpdaterInstallCore($root, $stateDir, $config, $assets, $meta, $tag);
+    else {
+        $tmpState = $stateDir . '/release.json.tmp';
+        file_put_contents($tmpState, json_encode($meta, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_PRETTY_PRINT), LOCK_EX);
+        rename($tmpState, $stateDir . '/release.json');
+    }
+
+    // APK mirror is best-effort and can finish on later cron runs.
+    radoUpdaterMirrorApps($root, $stateDir, $config, $assets, $meta);
+
     try {
         require_once $root . '/rado-system/lib/tick.php';
         rado_run_platform_tick();
