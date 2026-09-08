@@ -1,0 +1,45 @@
+name: Apply Passenger Map Fix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.maintenance/APPLY_PASSENGER_MAP_FIX'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: rado-passenger-map-source-patch
+  cancel-in-progress: false
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Apply deterministic source patch
+        run: python3 scripts/apply_passenger_map_fix.py
+      - name: Validate patch shape
+        run: |
+          set -euo pipefail
+          grep -q "_SelectionPin(destination: _step > 0)" apps/passenger/lib/runtime_passenger.dart
+          grep -q "NeshanPolyline" apps/passenger/lib/runtime_passenger.dart
+          grep -q "route-shadow" apps/passenger/lib/runtime_passenger.dart
+          grep -q "route_points" apps/passenger/lib/advanced_passenger.dart
+          grep -q "final List<LatLng> points" apps/passenger/lib/advanced_passenger.dart
+          git diff --check
+      - name: Commit patched application source
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/passenger/lib/runtime_passenger.dart apps/passenger/lib/advanced_passenger.dart
+          if git diff --cached --quiet; then
+            echo "Passenger map source already patched"
+            exit 0
+          fi
+          git commit -m "fix(passenger): precise map picker route line and search feedback"
+          git push origin HEAD:main
