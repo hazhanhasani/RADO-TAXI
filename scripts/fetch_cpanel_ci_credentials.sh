@@ -39,7 +39,6 @@ mapping={
     'STORE_PASSWORD':'store_password',
     'KEY_ALIAS':'key_alias',
     'KEY_PASSWORD':'key_password',
-    'NESHAN_MAP_KEY':'neshan_map_key',
 }
 with open(env_path,'a',encoding='utf-8') as out:
     for env_name, key in mapping.items():
