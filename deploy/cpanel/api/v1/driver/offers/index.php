@@ -13,8 +13,16 @@ try {
         $presenceStmt = $pdo->prepare('SELECT * FROM driver_presence WHERE driver_id=? LIMIT 1');
         $presenceStmt->execute([$driverId]);
         $presence = $presenceStmt->fetch();
-        if (is_array($presence) && (int)$presence['is_online'] === 1 && $presence['latitude'] !== null && $presence['longitude'] !== null) {
-            rado_offer_waiting_trip_to_driver($pdo, $driverId, (float)$presence['latitude'], (float)$presence['longitude']);
+        if (is_array($presence) && (int)$presence['is_online'] === 1) {
+            if ($presence['latitude'] !== null && $presence['longitude'] !== null) {
+                rado_offer_waiting_trip_to_driver($pdo, $driverId, (float)$presence['latitude'], (float)$presence['longitude']);
+            } else {
+                $waiting = $pdo->query("SELECT id FROM trips WHERE status='searching' AND requested_at>=DATE_SUB(NOW(),INTERVAL 10 MINUTE) ORDER BY requested_at ASC LIMIT 1")->fetchColumn();
+                if ($waiting !== false) {
+                    $insert = $pdo->prepare('INSERT IGNORE INTO trip_offers(trip_id,driver_id,offered_at,expires_at) VALUES(?,?,NOW(),DATE_ADD(NOW(),INTERVAL 25 SECOND))');
+                    $insert->execute([(string)$waiting,$driverId]);
+                }
+            }
         }
 
         $activeStmt = $pdo->prepare("SELECT id FROM trips WHERE driver_id=? AND status IN ('driver_assigned','driver_arriving','arrived','in_progress') ORDER BY accepted_at DESC LIMIT 1");
