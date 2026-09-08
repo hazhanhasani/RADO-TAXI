@@ -102,24 +102,27 @@ jobs:
           flutter build apk --release --build-name="$VERSION" --build-number="$BUILD_CODE"
           cp build/app/outputs/flutter-apk/app-release.apk "../../RADO-Driver-v${VERSION}.apk"
 
-      - name: Build cPanel package
+      - name: Build complete cPanel package
         run: |
           rm -rf dist/cpanel
-          mkdir -p dist/cpanel/rado-system/bin dist/cpanel/rado-system/state dist/cpanel/rado-system/private dist/cpanel/downloads dist/cpanel/assets/branding dist/cpanel/api/app-updates dist/cpanel/api/ci-credentials dist/cpanel/api/health dist/cpanel/sql
+          mkdir -p dist/cpanel/rado-system dist/cpanel/assets/branding
           cp deploy/cpanel/.htaccess dist/cpanel/.htaccess
           cp deploy/cpanel/index.php dist/cpanel/index.php
           cp deploy/cpanel/setup.php dist/cpanel/setup.php
-          cp deploy/cpanel/downloads/.htaccess dist/cpanel/downloads/.htaccess
-          cp deploy/cpanel/config.php dist/cpanel/rado-system/config.php
-          cp deploy/cpanel/rado-system/private/.htaccess dist/cpanel/rado-system/private/.htaccess
-          cp deploy/cpanel/bin/rado-update.php dist/cpanel/rado-system/bin/rado-update.php
-          cp deploy/cpanel/api/app-updates/index.php dist/cpanel/api/app-updates/index.php
-          cp deploy/cpanel/api/ci-credentials/index.php dist/cpanel/api/ci-credentials/index.php
-          cp deploy/cpanel/api/health/index.php dist/cpanel/api/health/index.php
-          cp deploy/cpanel/sql/schema.sql dist/cpanel/sql/schema.sql
           cp deploy/cpanel/INSTALL.txt dist/cpanel/INSTALL.txt
+          cp -a deploy/cpanel/api dist/cpanel/api
+          cp -a deploy/cpanel/admin dist/cpanel/admin
+          cp -a deploy/cpanel/downloads dist/cpanel/downloads
+          cp -a deploy/cpanel/sql dist/cpanel/sql
+          cp -a deploy/cpanel/rado-system/. dist/cpanel/rado-system/
+          cp deploy/cpanel/config.php dist/cpanel/rado-system/config.php
+          cp -a deploy/cpanel/bin dist/cpanel/rado-system/bin
           cp dist/icons/rado-passenger.png dist/cpanel/assets/branding/rado-passenger.png
           cp dist/icons/rado-driver.png dist/cpanel/assets/branding/rado-driver.png
+          test -f dist/cpanel/admin/index.php
+          test -f dist/cpanel/api/v1/fare/estimate/index.php
+          test -f dist/cpanel/api/v1/trips/index.php
+          test -f dist/cpanel/rado-system/lib/app.php
           (cd dist/cpanel && zip -qr "../../RADO-cPanel-v${VERSION}.zip" .)
 
       - name: Generate release manifest and checksums
@@ -130,12 +133,18 @@ jobs:
           PASS_SHA=$(sha256sum "$PASSENGER" | awk '{print $1}')
           DRIVER_SHA=$(sha256sum "$DRIVER" | awk '{print $1}')
           CPANEL_SHA=$(sha256sum "$CPANEL" | awk '{print $1}')
+          PUBLISHED_JALALI=$(php -r "require 'deploy/cpanel/rado-system/lib/app.php'; echo rado_jalali_datetime(null,true);")
+          PUBLISHED_LONG=$(php -r "require 'deploy/cpanel/rado-system/lib/app.php'; echo rado_jalali_long();")
+          export PUBLISHED_JALALI PUBLISHED_LONG
           python3 - <<PY
-          import json, os, datetime
+          import json, os
           version=os.environ['VERSION']; code=int(os.environ['BUILD_CODE'])
           data={
             'release':version,
-            'published_at':datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            'published_at':os.environ['PUBLISHED_JALALI'],
+            'published_at_long':os.environ['PUBLISHED_LONG'],
+            'timezone':'Asia/Tehran',
+            'calendar':'jalali',
             'apps':{
               'passenger':{'version':version,'version_code':code,'minimum_supported_code':1,'mandatory':False,'asset':f'RADO-Passenger-v{version}.apk','sha256':'$PASS_SHA'},
               'driver':{'version':version,'version_code':code,'minimum_supported_code':1,'mandatory':False,'asset':f'RADO-Driver-v{version}.apk','sha256':'$DRIVER_SHA'}
