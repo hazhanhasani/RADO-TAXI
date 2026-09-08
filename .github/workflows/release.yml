@@ -166,7 +166,7 @@ jobs:
         run: |
           set -euo pipefail
           rm -rf dist/cpanel
-          mkdir -p dist/cpanel/rado-system dist/cpanel/assets/branding
+          mkdir -p dist/cpanel/rado-system/bin dist/cpanel/assets/branding
           cp deploy/cpanel/.htaccess dist/cpanel/.htaccess
           cp deploy/cpanel/index.php dist/cpanel/index.php
           cp deploy/cpanel/setup.php dist/cpanel/setup.php
@@ -177,7 +177,7 @@ jobs:
           cp -a deploy/cpanel/sql dist/cpanel/sql
           cp -a deploy/cpanel/rado-system/. dist/cpanel/rado-system/
           cp deploy/cpanel/config.php dist/cpanel/rado-system/config.php
-          cp -a deploy/cpanel/bin dist/cpanel/rado-system/bin
+          cp -a deploy/cpanel/bin/. dist/cpanel/rado-system/bin/
           cp dist/icons/rado-passenger.png dist/cpanel/assets/branding/rado-passenger.png
           cp dist/icons/rado-driver.png dist/cpanel/assets/branding/rado-driver.png
           test -f dist/cpanel/admin/index.php
@@ -200,7 +200,11 @@ jobs:
           test -f dist/cpanel/rado-system/lib/app.php
           test -f dist/cpanel/rado-system/lib/platform.php
           test -f dist/cpanel/rado-system/lib/payments.php
+          test -f dist/cpanel/rado-system/bin/rado-update-core.php
+          test -f dist/cpanel/rado-system/bin/rado-update.php
           test -f dist/cpanel/rado-system/bin/rado-tick.php
+          test -f dist/cpanel/rado-system/bin/rado-migrate.php
+          test ! -d dist/cpanel/rado-system/bin/bin
           (cd dist/cpanel && zip -qr "../../RADO-cPanel-v${VERSION}.zip" .)
           test -s "RADO-cPanel-v${VERSION}.zip"
 
