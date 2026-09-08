@@ -2,6 +2,8 @@ from pathlib import Path
 
 path = Path('apps/passenger/lib/runtime_passenger.dart')
 text = path.read_text()
+if "import 'dart:ui' as ui;" not in text:
+    text = text.replace("import 'dart:math';\n", "import 'dart:math';\nimport 'dart:ui' as ui;\n", 1)
 old = '''class _SelectionPin extends StatelessWidget {
   const _SelectionPin({required this.destination});
   final bool destination;
@@ -153,7 +155,7 @@ class _SelectionPinNeedlePainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final path = Path()
+    final path = ui.Path()
       ..moveTo(2, 0)
       ..lineTo(size.width - 2, 0)
       ..lineTo(size.width / 2, size.height)
