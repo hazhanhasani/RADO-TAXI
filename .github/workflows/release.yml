@@ -98,7 +98,10 @@ jobs:
           EOF
           python3 ../../scripts/configure_android_signing.py android/app/build.gradle.kts
           flutter analyze
-          flutter build apk --release --build-name="$VERSION" --build-number="$BUILD_CODE"
+          flutter build apk --release \
+            --build-name="$VERSION" \
+            --build-number="$BUILD_CODE" \
+            --dart-define=RADO_API_BASE_URL="https://rado-taxi.sbs"
           cp build/app/outputs/flutter-apk/app-release.apk "../../RADO-Driver-v${VERSION}.apk"
 
       - name: Build complete cPanel package
@@ -121,6 +124,12 @@ jobs:
           test -f dist/cpanel/admin/index.php
           test -f dist/cpanel/api/v1/fare/estimate/index.php
           test -f dist/cpanel/api/v1/trips/index.php
+          test -f dist/cpanel/api/v1/trips/status/index.php
+          test -f dist/cpanel/api/v1/driver/session/index.php
+          test -f dist/cpanel/api/v1/driver/presence/index.php
+          test -f dist/cpanel/api/v1/driver/offers/index.php
+          test -f dist/cpanel/api/v1/driver/trip/index.php
+          test -f dist/cpanel/api/v1/driver/wallet/index.php
           test -f dist/cpanel/rado-system/lib/app.php
           (cd dist/cpanel && zip -qr "../../RADO-cPanel-v${VERSION}.zip" .)
 
