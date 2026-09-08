@@ -2,12 +2,11 @@ name: RADO Production Release
 
 on:
   push:
-    tags:
-      - 'v*'
-    branches:
-      - main
+    branches: [main]
     paths:
       - '.release/RADO_RELEASE'
+    tags:
+      - 'v*'
 
 permissions:
   contents: write
@@ -34,30 +33,29 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Resolve and validate release version
+      - name: Resolve and validate version
         shell: bash
         run: |
           set -euo pipefail
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             VERSION="${GITHUB_REF_NAME#v}"
           else
-            test -f .release/RADO_RELEASE
             VERSION="$(tr -d '[:space:]' < .release/RADO_RELEASE)"
             VERSION="${VERSION#v}"
           fi
           python3 - "$VERSION" <<'PY'
-          import re, sys
+          import re,sys
           v=sys.argv[1]
-          if not re.fullmatch(r'\d+\.\d+\.\d+', v):
-              raise SystemExit(f'Invalid semantic version: {v}')
-          major,minor,patch=map(int,v.split('.'))
+          m=re.fullmatch(r'(\d+)\.(\d+)\.(\d+)',v)
+          if not m: raise SystemExit('Release version must be X.Y.Z')
+          major,minor,patch=map(int,m.groups())
+          if minor>=1000 or patch>=1000: raise SystemExit('minor/patch must be below 1000')
           code=major*1_000_000+minor*1_000+patch
-          print(f'Validated RADO version {v} -> versionCode {code}')
-          with open('/tmp/rado-build-code','w') as f: f.write(str(code))
+          if not 0 < code <= 2_100_000_000: raise SystemExit('Android versionCode out of range')
+          open('/tmp/rado-code','w').write(str(code))
           PY
-          BUILD_CODE="$(cat /tmp/rado-build-code)"
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-          echo "BUILD_CODE=$BUILD_CODE" >> "$GITHUB_ENV"
+          echo "BUILD_CODE=$(cat /tmp/rado-code)" >> "$GITHUB_ENV"
 
       - name: Enforce monotonic version and app metadata
         shell: bash
@@ -65,26 +63,21 @@ jobs:
           set -euo pipefail
           test "$(grep '^version:' apps/passenger/pubspec.yaml | awk '{print $2}')" = "${VERSION}+${BUILD_CODE}"
           test "$(grep '^version:' apps/driver/pubspec.yaml | awk '{print $2}')" = "${VERSION}+${BUILD_CODE}"
-          LATEST="$(curl -fsSL -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/latest" | python3 -c "import json,sys; print(json.load(sys.stdin).get('tag_name',''))" || true)"
+          LATEST="$(curl -fsSL -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/latest" | python3 -c "import json,sys;print(json.load(sys.stdin).get('tag_name','v0.0.0').lstrip('v'))" || echo 0.0.0)"
           python3 - "$VERSION" "$LATEST" <<'PY'
           import sys
-          current=tuple(map(int,sys.argv[1].split('.')))
-          latest_raw=sys.argv[2].lstrip('v')
-          if latest_raw:
-              latest=tuple(map(int,latest_raw.split('.')))
-              if current <= latest:
-                  raise SystemExit(f'Release version must increase: requested={current}, latest={latest}')
+          cur=tuple(map(int,sys.argv[1].split('.')))
+          old=tuple(map(int,sys.argv[2].split('.')))
+          if cur<=old: raise SystemExit(f'Version must increase: requested={cur}, latest={old}')
           PY
-          STATUS="$(curl -sS -o /tmp/existing-release.json -w '%{http_code}' -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/v${VERSION}")"
-          if [[ "$STATUS" == "200" ]]; then
-            echo "Release v${VERSION} already exists"
-            exit 1
-          fi
+          STATUS="$(curl -sS -o /tmp/existing.json -w '%{http_code}' -H 'Accept: application/vnd.github+json' "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/v${VERSION}")"
+          test "$STATUS" != 200 || { echo "v${VERSION} already exists"; exit 1; }
 
-      - name: Fetch permanent signing credentials from RADO cPanel
+      - name: Fetch permanent signing credentials from cPanel
         run: bash scripts/fetch_cpanel_ci_credentials.sh
 
-      - name: Fetch official RADO icons from cPanel
+      - name: Fetch official RADO icons
+        shell: bash
         run: |
           set -euo pipefail
           mkdir -p apps/passenger/assets/branding apps/driver/assets/branding dist/icons
@@ -97,6 +90,7 @@ jobs:
 
       - name: Build Passenger APK
         working-directory: apps/passenger
+        shell: bash
         run: |
           set -euo pipefail
           flutter create . --platforms=android --project-name=rado_passenger --org=ir.rado.taxi
@@ -105,9 +99,10 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           p=Path('android/app/src/main/AndroidManifest.xml')
-          s=p.read_text(); marker='<manifest xmlns:android="http://schemas.android.com/apk/res/android">'
-          perms='''<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n    <uses-permission android:name="android.permission.INTERNET"/>\n    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>'''
-          if 'android.permission.INTERNET' not in s: s=s.replace(marker,perms,1)
+          s=p.read_text()
+          marker='<manifest xmlns:android="http://schemas.android.com/apk/res/android">'
+          replacement='''<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n    <uses-permission android:name="android.permission.INTERNET"/>\n    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>'''
+          if 'android.permission.INTERNET' not in s: s=s.replace(marker,replacement,1)
           p.write_text(s)
           PY
           flutter pub get
@@ -124,13 +119,13 @@ jobs:
           flutter build apk --release \
             --build-name="$VERSION" \
             --build-number="$BUILD_CODE" \
-            --dart-define=NESHAN_MAP_KEY="$NESHAN_MAP_KEY" \
             --dart-define=RADO_API_BASE_URL="https://rado-taxi.sbs"
           cp build/app/outputs/flutter-apk/app-release.apk "../../RADO-Passenger-v${VERSION}.apk"
           test -s "../../RADO-Passenger-v${VERSION}.apk"
 
       - name: Build Driver APK
         working-directory: apps/driver
+        shell: bash
         run: |
           set -euo pipefail
           flutter create . --platforms=android --project-name=rado_driver --org=ir.rado.taxi
@@ -139,9 +134,10 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           p=Path('android/app/src/main/AndroidManifest.xml')
-          s=p.read_text(); marker='<manifest xmlns:android="http://schemas.android.com/apk/res/android">'
-          perms='''<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n    <uses-permission android:name="android.permission.INTERNET"/>\n    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>'''
-          if 'android.permission.INTERNET' not in s: s=s.replace(marker,perms,1)
+          s=p.read_text()
+          marker='<manifest xmlns:android="http://schemas.android.com/apk/res/android">'
+          replacement='''<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n    <uses-permission android:name="android.permission.INTERNET"/>\n    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>'''
+          if 'android.permission.INTERNET' not in s: s=s.replace(marker,replacement,1)
           p.write_text(s)
           PY
           flutter pub get
@@ -163,6 +159,7 @@ jobs:
           test -s "../../RADO-Driver-v${VERSION}.apk"
 
       - name: Build complete cPanel package
+        shell: bash
         run: |
           set -euo pipefail
           rm -rf dist/cpanel
@@ -181,25 +178,16 @@ jobs:
           cp dist/icons/rado-passenger.png dist/cpanel/assets/branding/rado-passenger.png
           cp dist/icons/rado-driver.png dist/cpanel/assets/branding/rado-driver.png
           test -f dist/cpanel/admin/index.php
-          test -f dist/cpanel/admin/platform.php
+          test -f dist/cpanel/admin/maps.php
           test -f dist/cpanel/admin/live-map.php
-          test -f dist/cpanel/admin/export.php
+          test -f dist/cpanel/api/v1/maps/config/index.php
+          test -f dist/cpanel/api/v1/maps/reverse/index.php
           test -f dist/cpanel/api/v1/maps/search/index.php
+          test -f dist/cpanel/api/v1/maps/route/index.php
           test -f dist/cpanel/api/v1/fare/estimate/index.php
           test -f dist/cpanel/api/v1/trips/index.php
           test -f dist/cpanel/api/v1/trips/status/index.php
-          test -f dist/cpanel/api/v1/trips/change/index.php
-          test -f dist/cpanel/api/v1/driver/session/index.php
-          test -f dist/cpanel/api/v1/driver/presence/index.php
           test -f dist/cpanel/api/v1/driver/offers/index.php
-          test -f dist/cpanel/api/v1/driver/trip/index.php
-          test -f dist/cpanel/api/v1/driver/wallet/index.php
-          test -f dist/cpanel/api/v1/driver/documents/index.php
-          test -f dist/cpanel/sql/migrations/040_platform.sql
-          test -f dist/cpanel/sql/migrations/041_operations.sql
-          test -f dist/cpanel/rado-system/lib/app.php
-          test -f dist/cpanel/rado-system/lib/platform.php
-          test -f dist/cpanel/rado-system/lib/payments.php
           test -f dist/cpanel/rado-system/bin/rado-update-core.php
           test -f dist/cpanel/rado-system/bin/rado-update.php
           test -f dist/cpanel/rado-system/bin/rado-tick.php
@@ -208,32 +196,28 @@ jobs:
           (cd dist/cpanel && zip -qr "../../RADO-cPanel-v${VERSION}.zip" .)
           test -s "RADO-cPanel-v${VERSION}.zip"
 
-      - name: Generate release manifest and checksums
+      - name: Generate manifest and checksums
+        shell: bash
         run: |
           set -euo pipefail
           PASSENGER="RADO-Passenger-v${VERSION}.apk"
           DRIVER="RADO-Driver-v${VERSION}.apk"
           CPANEL="RADO-cPanel-v${VERSION}.zip"
-          PASS_SHA=$(sha256sum "$PASSENGER" | awk '{print $1}')
-          DRIVER_SHA=$(sha256sum "$DRIVER" | awk '{print $1}')
-          CPANEL_SHA=$(sha256sum "$CPANEL" | awk '{print $1}')
-          PUBLISHED_JALALI=$(php -r "require 'deploy/cpanel/rado-system/lib/app.php'; echo rado_jalali_datetime(null,true);")
-          PUBLISHED_LONG=$(php -r "require 'deploy/cpanel/rado-system/lib/app.php'; echo rado_jalali_long();")
-          export PUBLISHED_JALALI PUBLISHED_LONG PASS_SHA DRIVER_SHA CPANEL_SHA
+          export PASS_SHA="$(sha256sum "$PASSENGER" | awk '{print $1}')"
+          export DRIVER_SHA="$(sha256sum "$DRIVER" | awk '{print $1}')"
+          export CPANEL_SHA="$(sha256sum "$CPANEL" | awk '{print $1}')"
+          export PUBLISHED_JALALI="$(php -r "require 'deploy/cpanel/rado-system/lib/app.php';echo rado_jalali_datetime(null,true);")"
+          export PUBLISHED_LONG="$(php -r "require 'deploy/cpanel/rado-system/lib/app.php';echo rado_jalali_long();")"
           python3 - <<'PY'
-          import json, os
-          version=os.environ['VERSION']; code=int(os.environ['BUILD_CODE'])
+          import json,os
+          version=os.environ['VERSION'];code=int(os.environ['BUILD_CODE'])
           data={
-            'release':version,
-            'published_at':os.environ['PUBLISHED_JALALI'],
-            'published_at_long':os.environ['PUBLISHED_LONG'],
-            'timezone':'Asia/Tehran',
-            'calendar':'jalali',
+            'release':version,'published_at':os.environ['PUBLISHED_JALALI'],'published_at_long':os.environ['PUBLISHED_LONG'],'timezone':'Asia/Tehran','calendar':'jalali',
             'apps':{
               'passenger':{'version':version,'version_code':code,'minimum_supported_code':1,'mandatory':False,'asset':f'RADO-Passenger-v{version}.apk','sha256':os.environ['PASS_SHA']},
-              'driver':{'version':version,'version_code':code,'minimum_supported_code':1,'mandatory':False,'asset':f'RADO-Driver-v{version}.apk','sha256':os.environ['DRIVER_SHA']}
+              'driver':{'version':version,'version_code':code,'minimum_supported_code':1,'mandatory':False,'asset':f'RADO-Driver-v{version}.apk','sha256':os.environ['DRIVER_SHA']},
             },
-            'cpanel':{'version':version,'asset':f'RADO-cPanel-v{version}.zip','sha256':os.environ['CPANEL_SHA']}
+            'cpanel':{'version':version,'asset':f'RADO-cPanel-v{version}.zip','sha256':os.environ['CPANEL_SHA']},
           }
           open('RADO-release.json','w').write(json.dumps(data,ensure_ascii=False,indent=2))
           PY
@@ -258,21 +242,25 @@ jobs:
       - name: Verify release is really published
         env:
           GH_TOKEN: ${{ github.token }}
+        shell: bash
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import json, os, subprocess
+          import json,os,subprocess
           version=os.environ['VERSION']
           raw=subprocess.check_output(['gh','api',f'repos/{os.environ["GITHUB_REPOSITORY"]}/releases/tags/v{version}'],text=True)
           r=json.loads(raw)
           if r.get('draft') or r.get('prerelease') or not r.get('published_at'):
-              raise SystemExit('Release is not a final published release')
+              raise SystemExit('Release is not final/published')
           assets={a['name']:a for a in r.get('assets',[])}
-          required=[f'RADO-Passenger-v{version}.apk',f'RADO-Driver-v{version}.apk',f'RADO-cPanel-v{version}.zip','RADO-release.json','SHA256SUMS.txt']
-          missing=[name for name in required if name not in assets or int(assets[name].get('size',0)) <= 0 or assets[name].get('state') != 'uploaded']
-          if missing:
-              raise SystemExit('Missing/invalid release assets: '+', '.join(missing))
-          print('Verified final RADO release:', r['tag_name'])
-          for name in required:
-              print(name, assets[name]['size'])
+          required={
+            f'RADO-Passenger-v{version}.apk':1_000_000,
+            f'RADO-Driver-v{version}.apk':1_000_000,
+            f'RADO-cPanel-v{version}.zip':10_000,
+            'RADO-release.json':100,
+            'SHA256SUMS.txt':100,
+          }
+          bad=[name for name,min_size in required.items() if name not in assets or assets[name].get('state')!='uploaded' or int(assets[name].get('size',0))<min_size]
+          if bad: raise SystemExit('Missing/invalid assets: '+', '.join(bad))
+          print('Verified final RADO release',r['tag_name'])
           PY
