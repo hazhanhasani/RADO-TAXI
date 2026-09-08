@@ -170,7 +170,6 @@ function rado_db(): PDO
     try {
         $pdo->exec("SET time_zone = '+03:30'");
     } catch (Throwable) {
-        // Some shared hosts restrict SET time_zone; PHP formatting still uses Asia/Tehran.
     }
     return $pdo;
 }
