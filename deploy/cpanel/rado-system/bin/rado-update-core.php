@@ -13,6 +13,17 @@ $stateDir = $root . '/rado-system/state';
 $lock = fopen($stateDir . '/update.lock', 'c+');
 if (!$lock || !flock($lock, LOCK_EX | LOCK_NB)) exit("Another update is running\n");
 
+function radoUpdaterNowIsoTehran(): string {
+    try {
+        if (function_exists('rado_tehran_datetime')) {
+            return rado_tehran_datetime()->format(DateTimeInterface::ATOM);
+        }
+        return (new DateTimeImmutable('now', new DateTimeZone('Asia/Tehran')))->format(DateTimeInterface::ATOM);
+    } catch (Throwable) {
+        return date('c');
+    }
+}
+
 function radoUpdaterHttpGet(string $url, array $config): string {
     $ch = curl_init($url);
     curl_setopt_array($ch, [
@@ -191,7 +202,7 @@ try {
     }
 
     file_put_contents($stateDir . '/last_success_at', rado_jalali_datetime(null, true) . "\n", LOCK_EX);
-    file_put_contents($stateDir . '/last_success_iso', rado_now_iso_tehran() . "\n", LOCK_EX);
+    file_put_contents($stateDir . '/last_success_iso', radoUpdaterNowIsoTehran() . "\n", LOCK_EX);
     file_put_contents($stateDir . '/update_status', "ok\n", LOCK_EX);
     @unlink($stateDir . '/last_error_current.log');
     echo "RADO updated to $tag at " . rado_jalali_datetime(null, true) . " Asia/Tehran\n";
