@@ -12,6 +12,7 @@ function rado_tick_now(): string
 function rado_run_platform_tick(): array
 {
     $pdo = rado_db();
+    $expiredVerificationDrivers = [];
     $pdo->beginTransaction();
     try {
         $online = $pdo->query("SELECT driver_id FROM driver_presence WHERE is_online=1 AND last_seen_at>=DATE_SUB(NOW(),INTERVAL 6 MINUTE)")->fetchAll(PDO::FETCH_COLUMN);
@@ -20,12 +21,24 @@ function rado_run_platform_tick(): array
         }
         $pdo->exec("UPDATE driver_presence SET is_online=0 WHERE is_online=1 AND (last_seen_at IS NULL OR last_seen_at<DATE_SUB(NOW(),INTERVAL 3 MINUTE))");
         $pdo->exec("UPDATE driver_documents SET status='expired' WHERE expires_at IS NOT NULL AND expires_at<CURDATE() AND status='approved'");
+        try {
+            $expiredVerificationDrivers = $pdo->query("SELECT DISTINCT d.driver_id FROM driver_documents d JOIN drivers r ON r.user_id=d.driver_id JOIN driver_verification_profiles v ON v.driver_id=d.driver_id WHERE d.status='expired' AND d.document_type IN ('national_card_front','national_card_back','driver_license_front','driver_license_back','vehicle_card_front','vehicle_card_back','insurance','profile_photo','vehicle_front') AND r.status='approved' AND v.review_status='approved'")->fetchAll(PDO::FETCH_COLUMN);
+            foreach ($expiredVerificationDrivers as $expiredDriverId) {
+                $pdo->prepare("UPDATE drivers SET status='suspended' WHERE user_id=?")->execute([(string)$expiredDriverId]);
+                $pdo->prepare("UPDATE driver_verification_profiles SET review_status='suspended',review_note='یکی از مدارک الزامی منقضی شده است',reviewed_at=NOW() WHERE driver_id=?")->execute([(string)$expiredDriverId]);
+                $pdo->prepare('UPDATE driver_presence SET is_online=0 WHERE driver_id=?')->execute([(string)$expiredDriverId]);
+            }
+        } catch (Throwable) {}
         $pdo->exec("DELETE FROM realtime_events WHERE expires_at<NOW()");
         $pdo->exec("UPDATE trip_offers SET accepted=0,responded_at=COALESCE(responded_at,NOW()) WHERE accepted IS NULL AND expires_at<NOW()");
         $pdo->commit();
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) $pdo->rollBack();
         throw $e;
+    }
+
+    foreach ($expiredVerificationDrivers as $expiredDriverId) {
+        try { rado_platform_notify($pdo, (string)$expiredDriverId, 'مدرک راننده منقضی شده', 'برای ادامه فعالیت، مدرک منقضی‌شده را در بخش احراز هویت دوباره ارسال کنید.', 'verification_expired', []); } catch (Throwable) {}
     }
 
     $scheduled = 0;

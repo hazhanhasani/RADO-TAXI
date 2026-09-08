@@ -35,6 +35,7 @@ function ra_nav(): array { return [
     'dashboard'=>['داشبورد','/admin/dashboard.php','⌂'],
     'trips'=>['سفرها','/admin/trips.php','↔'],
     'drivers'=>['رانندگان','/admin/drivers.php','🚕'],
+    'verification'=>['احراز هویت','/admin/verification.php','✓'],
     'passengers'=>['مسافران','/admin/passengers.php','👤'],
     'operations'=>['عملیات','/admin/operations.php','◎'],
     'live'=>['زنده','/admin/live-map.php','●'],

@@ -239,12 +239,15 @@ function rado_verification_summary(PDO $pdo, string $driverId): array
     }
     $missing = rado_verification_missing($pdo,$driverId,false);
     $approvalMissing = rado_verification_missing($pdo,$driverId,true);
-    $total = 8;
+    $requiredChecks = ['shahkar_status','biometric_status','license_status','vehicle_status','iban_status'];
+    if ((rado_setting($pdo,'driver_verification_require_driving_score','1') ?? '1') === '1') $requiredChecks[] = 'driving_score_status';
+    if ((rado_setting($pdo,'driver_verification_require_active_plates','0') ?? '0') === '1') $requiredChecks[] = 'active_plates_status';
+    $total = 2 + count($requiredChecks);
     $done = 0;
     if (!empty($p['mobile_verified_at'])) $done++;
-    foreach (['shahkar_status','biometric_status','license_status','vehicle_status','iban_status','driving_score_status'] as $k) if (($p[$k] ?? '') === 'passed') $done++;
+    foreach ($requiredChecks as $k) if (($p[$k] ?? '') === 'passed') $done++;
     if (empty($p['consent_at']) === false) $done++;
-    $progress = (int)round(($done / $total) * 100);
+    $progress = (int)round(($done / max(1,$total)) * 100);
 
     return [
         'profile'=>[

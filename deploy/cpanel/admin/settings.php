@@ -19,6 +19,7 @@ ra_header('تنظیمات','platform','مرکز تنظیمات RADO؛ همه ب�
 </div>
 <div class="grid">
   <a class="card span4 module" href="/admin/maps.php"><div class="icon">⌖</div><div><b>نقشه و Neshan</b><small>کلیدها، تست اتصال و سلامت سرویس‌های مکانی</small></div></a>
+  <a class="card span4 module" href="/admin/verification-settings.php"><div class="icon">✓</div><div><b>API.ir و احراز هویت</b><small>شاهکار، بایومتریک، گواهینامه، خودرو و تطبیق شبا</small></div></a>
   <a class="card span4 module" href="/admin/finance.php"><div class="icon">﷼</div><div><b>تعرفه و کمیسیون</b><small>قیمت‌گذاری، کمیسیون، تسویه و بازپرداخت</small></div></a>
   <a class="card span4 module" href="/admin/system.php"><div class="icon">↻</div><div><b>سیستم و آپدیت</b><small>نسخه، Cron، Release، خطاها و سلامت سرویس</small></div></a>
   <a class="card span4 module" href="/admin/operations.php"><div class="icon">◎</div><div><b>عملیات و Dispatch</b><small>شعاع تخصیص، صف درخواست‌ها، تخصیص دستی و لغو مدیریتی</small></div></a>

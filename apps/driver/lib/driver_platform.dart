@@ -320,16 +320,32 @@ class DriverSession {
     required this.commissionRate,
     required this.plate,
     required this.vehicle,
+    required this.verificationRequired,
+    required this.verificationStatus,
+    required this.verificationProgress,
   });
-  final String name, status, plate, vehicle;
-  final bool approved, online;
+  final String name, status, plate, vehicle, verificationStatus;
+  final bool approved, online, verificationRequired;
   final double commissionRate;
-  String get statusFa => switch (status) {
-    'approved' => 'تأییدشده',
-    'suspended' => 'تعلیق‌شده',
-    'rejected' => 'ردشده',
-    _ => 'در انتظار تأیید',
-  };
+  final int verificationProgress;
+  String get statusFa {
+    if (verificationRequired && verificationStatus != 'approved') {
+      return switch (verificationStatus) {
+        'submitted' => 'پرونده ارسال شده',
+        'under_review' => 'در حال بررسی احراز هویت',
+        'needs_correction' => 'احراز هویت نیاز به اصلاح دارد',
+        'rejected' => 'احراز هویت رد شده',
+        'suspended' => 'احراز هویت تعلیق شده',
+        _ => 'احراز هویت کامل نشده',
+      };
+    }
+    return switch (status) {
+      'approved' => 'تأییدشده',
+      'suspended' => 'تعلیق‌شده',
+      'rejected' => 'ردشده',
+      _ => 'در انتظار تأیید',
+    };
+  }
   factory DriverSession.fromJson(Map<String, dynamic> j) => DriverSession(
     name: (j['name'] ?? 'راننده RADO').toString(),
     status: (j['status'] ?? 'pending').toString(),
@@ -338,6 +354,9 @@ class DriverSession {
     commissionRate: (j['commission_rate'] as num?)?.toDouble() ?? 0,
     plate: (j['plate'] ?? '').toString(),
     vehicle: (j['vehicle'] ?? '').toString(),
+    verificationRequired: j['verification_required'] != false,
+    verificationStatus: (j['verification_status'] ?? 'incomplete').toString(),
+    verificationProgress: (j['verification_progress'] as num?)?.toInt() ?? 0,
   );
 }
 

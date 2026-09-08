@@ -10,6 +10,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'app_notifications.dart';
 import 'driver_platform.dart';
+import 'driver_verification.dart';
 import 'realtime_stream.dart';
 
 const _yellow = Color(0xFFF7B500);
@@ -782,6 +783,15 @@ class _AdvancedDriverPageState extends State<AdvancedDriverPage> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
   }
 
+  Future<void> _openVerificationCenter() async {
+    final id = _clientId;
+    if (id == null || !mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => DriverVerificationPage(clientId: id)),
+    );
+    await _refresh(all: true);
+  }
+
   @override
   Widget build(BuildContext context) {
     final pages = [_home(), _tripsPage(), _earningsPage(), _accountPage()];
@@ -908,13 +918,36 @@ class _AdvancedDriverPageState extends State<AdvancedDriverPage> {
   );
 
   Widget _approvalCard() => _Box(
-    child: Row(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Icon(Icons.verified_user_outlined),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Text(
-            'حساب راننده ${_session?.statusFa ?? 'در انتظار تأیید'} است. پس از تأیید مدیریت می‌توانی آنلاین شوی.',
+        Row(
+          children: [
+            const Icon(Icons.verified_user_outlined),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                _session?.statusFa ?? 'احراز هویت کامل نشده',
+                style: const TextStyle(fontWeight: FontWeight.w900),
+              ),
+            ),
+            if ((_session?.verificationProgress ?? 0) > 0)
+              Text('${_session!.verificationProgress}٪'),
+          ],
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'برای آنلاین‌شدن، هویت، موبایل، گواهینامه، خودرو، شبا، بایومتریک و مدارک باید تأیید شوند.',
+          style: TextStyle(fontSize: 12, color: Colors.black54),
+        ),
+        const SizedBox(height: 10),
+        SizedBox(
+          width: double.infinity,
+          child: FilledButton.icon(
+            onPressed: _openVerificationCenter,
+            style: FilledButton.styleFrom(backgroundColor: _yellow, foregroundColor: _black),
+            icon: const Icon(Icons.fact_check_rounded),
+            label: const Text('تکمیل احراز هویت'),
           ),
         ),
       ],
@@ -1219,6 +1252,17 @@ class _AdvancedDriverPageState extends State<AdvancedDriverPage> {
       children: [
         _header(),
         const SizedBox(height: 14),
+        _Box(
+          child: ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: const Icon(Icons.verified_user_rounded, color: _yellow),
+            title: const Text('احراز هویت راننده', style: TextStyle(fontWeight: FontWeight.w900)),
+            subtitle: Text(_session?.statusFa ?? 'مشاهده و تکمیل پرونده'),
+            trailing: const Icon(Icons.chevron_left_rounded),
+            onTap: _openVerificationCenter,
+          ),
+        ),
+        const SizedBox(height: 12),
         _Box(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,

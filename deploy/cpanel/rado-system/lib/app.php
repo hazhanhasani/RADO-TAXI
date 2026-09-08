@@ -327,12 +327,31 @@ function rado_require_approved_driver(PDO $pdo, string $clientId): array
     if ($driver === null) {
         $driver = rado_guest_driver($pdo, $clientId);
     }
-    if ((int)($driver['is_active'] ?? 0) !== 1 || (string)($driver['status'] ?? '') !== 'approved') {
+    $baseApproved = (int)($driver['is_active'] ?? 0) === 1 && (string)($driver['status'] ?? '') === 'approved';
+    $verificationRequired = (rado_setting($pdo, 'driver_verification_enforced', '1') ?? '1') === '1';
+    $verificationApproved = true;
+    $verificationStatus = 'not_available';
+    if ($verificationRequired) {
+        $verificationApproved = false;
+        try {
+            $q = $pdo->prepare("SELECT review_status FROM driver_verification_profiles WHERE driver_id=? LIMIT 1");
+            $q->execute([(string)$driver['id']]);
+            $v = $q->fetchColumn();
+            $verificationStatus = $v === false ? 'incomplete' : (string)$v;
+            $verificationApproved = $verificationStatus === 'approved';
+        } catch (Throwable) {
+            $verificationStatus = 'schema_missing';
+        }
+    }
+    if (!$baseApproved || !$verificationApproved) {
         rado_json(403, [
             'ok'=>false,
-            'error'=>'driver_not_approved',
-            'message'=>'حساب راننده هنوز توسط مدیریت رادو تأیید نشده است.',
+            'error'=>$baseApproved && !$verificationApproved ? 'driver_verification_required' : 'driver_not_approved',
+            'message'=>$baseApproved && !$verificationApproved
+                ? 'احراز هویت راننده هنوز تأیید نهایی نشده است.'
+                : 'حساب راننده هنوز توسط مدیریت رادو تأیید نشده است.',
             'driver_status'=>(string)($driver['status'] ?? 'pending'),
+            'verification_status'=>$verificationStatus,
         ]);
     }
     return $driver;
