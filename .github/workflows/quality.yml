@@ -33,7 +33,11 @@ jobs:
           test -f deploy/cpanel/admin/dispatch.php
           test -f deploy/cpanel/admin/live-map.php
           test -f deploy/cpanel/admin/export.php
+          test -f deploy/cpanel/admin/maps.php
+          test -f deploy/cpanel/api/v1/maps/config/index.php
+          test -f deploy/cpanel/api/v1/maps/reverse/index.php
           test -f deploy/cpanel/api/v1/maps/search/index.php
+          test -f deploy/cpanel/api/v1/maps/route/index.php
           test -f deploy/cpanel/api/v1/platform/index.php
           test -f deploy/cpanel/api/v1/trips/change/index.php
           test -f deploy/cpanel/api/v1/driver/documents/index.php
@@ -75,6 +79,18 @@ jobs:
           test ! -d "$tmp/rado-system/bin/bin"
           rm -rf "$tmp"
 
+      - name: Validate Neshan key separation
+        run: |
+          grep -q "neshan_web_map_key" deploy/cpanel/setup.php
+          grep -q "neshan_service_api_key" deploy/cpanel/setup.php
+          grep -q "Neshan Web Map Key missing" deploy/cpanel/api/ci-credentials/index.php
+          grep -q "admin/maps.php" deploy/cpanel/api/ci-credentials/index.php
+          grep -q "neshan_web_map_key" deploy/cpanel/admin/maps.php
+          grep -q "neshan_service_api_key" deploy/cpanel/admin/maps.php
+          grep -q "neshan_web_map_key_missing" deploy/cpanel/api/v1/maps/config/index.php
+          grep -q "place_name" deploy/cpanel/api/v1/maps/reverse/index.php
+          grep -q "split_configuration_ok" deploy/cpanel/api/health/index.php
+
       - name: Validate dispatch v2 contract
         run: |
           grep -q "require_once dirname(__DIR__, 4) . '/rado-system/lib/platform.php'" deploy/cpanel/api/v1/driver/offers/index.php
@@ -89,7 +105,7 @@ jobs:
             echo "Invalid cPanel API include depth detected"
             exit 1
           fi
-          grep -R "dirname(__DIR__, 4).*rado-system/lib/app.php" deploy/cpanel/api/v1/driver deploy/cpanel/api/v1/trips/status deploy/cpanel/api/v1/maps/search
+          grep -R "dirname(__DIR__, 4).*rado-system/lib/app.php" deploy/cpanel/api/v1/driver deploy/cpanel/api/v1/trips/status deploy/cpanel/api/v1/maps/search deploy/cpanel/api/v1/maps/config
           grep -R "dirname(__DIR__, 3).*rado-system/lib/app.php" deploy/cpanel/api/v1/platform deploy/cpanel/api/v1/trips/index.php
 
       - name: Verify Tehran and Jalali calendar core
