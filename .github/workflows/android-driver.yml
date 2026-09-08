@@ -99,7 +99,11 @@ jobs:
       - name: Build permanently signed release APK
         if: steps.credentials.outcome == 'success'
         working-directory: apps/driver
-        run: flutter build apk --release --build-name=0.2.2 --build-number="$GITHUB_RUN_NUMBER"
+        run: |
+          flutter build apk --release \
+            --build-name=0.3.0 \
+            --build-number="$GITHUB_RUN_NUMBER" \
+            --dart-define=RADO_API_BASE_URL="https://rado-taxi.sbs"
 
       - name: Rename APK
         if: steps.credentials.outcome == 'success'
