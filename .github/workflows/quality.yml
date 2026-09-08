@@ -15,6 +15,7 @@ jobs:
           test -f backend/database/schema.sql
           test -f apps/passenger/pubspec.yaml
           test -f apps/passenger/lib/advanced_passenger.dart
+          test -f apps/passenger/lib/runtime_passenger.dart
           test -f apps/passenger/lib/platform_features.dart
           test -f apps/driver/pubspec.yaml
           test -f apps/driver/lib/advanced_driver.dart
@@ -79,17 +80,19 @@ jobs:
           test ! -d "$tmp/rado-system/bin/bin"
           rm -rf "$tmp"
 
-      - name: Validate Neshan key separation
+      - name: Validate runtime Neshan architecture
         run: |
           grep -q "neshan_web_map_key" deploy/cpanel/setup.php
           grep -q "neshan_service_api_key" deploy/cpanel/setup.php
-          grep -q "Neshan Web Map Key missing" deploy/cpanel/api/ci-credentials/index.php
-          grep -q "admin/maps.php" deploy/cpanel/api/ci-credentials/index.php
+          grep -q "runtime_map_configured" deploy/cpanel/api/ci-credentials/index.php
+          ! grep -q "NESHAN_MAP_KEY" scripts/fetch_cpanel_ci_credentials.sh
           grep -q "neshan_web_map_key" deploy/cpanel/admin/maps.php
           grep -q "neshan_service_api_key" deploy/cpanel/admin/maps.php
           grep -q "neshan_web_map_key_missing" deploy/cpanel/api/v1/maps/config/index.php
           grep -q "place_name" deploy/cpanel/api/v1/maps/reverse/index.php
           grep -q "split_configuration_ok" deploy/cpanel/api/health/index.php
+          grep -q "/api/v1/maps/config/" apps/passenger/lib/runtime_passenger.dart
+          grep -q "RuntimePassengerPage" apps/passenger/lib/main.dart
 
       - name: Validate dispatch v2 contract
         run: |
