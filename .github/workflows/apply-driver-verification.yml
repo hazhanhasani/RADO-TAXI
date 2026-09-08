@@ -1,0 +1,85 @@
+name: Apply Driver Verification Integration
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.maintenance/APPLY_DRIVER_VERIFICATION'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: rado-driver-verification-integration
+  cancel-in-progress: false
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply integration patch
+        run: python3 scripts/apply_driver_verification_integration.py
+
+      - name: Verify source guards
+        run: |
+          set -euo pipefail
+          grep -q "/admin/verification.php" deploy/cpanel/admin/_ui.php
+          grep -q "driver_verification_required" deploy/cpanel/rado-system/lib/app.php
+          grep -q "DriverVerificationPage" apps/driver/lib/advanced_driver.dart
+          grep -q "verificationRequired" apps/driver/lib/driver_platform.dart
+          grep -q "android.permission.CAMERA" .github/workflows/release.yml
+          grep -q "android.permission.RECORD_AUDIO" .github/workflows/android-driver.yml
+          grep -q "driver_verification_profiles" deploy/cpanel/sql/migrations/043_driver_verification.sql
+          grep -q "VideoLive" deploy/cpanel/rado-system/lib/api_ir.php
+          grep -q "run_biometric" deploy/cpanel/api/v1/driver/verification/index.php
+          git diff --check
+
+      - name: PHP syntax check
+        run: |
+          php -l deploy/cpanel/rado-system/lib/app.php
+          php -l deploy/cpanel/rado-system/lib/api_ir.php
+          php -l deploy/cpanel/rado-system/lib/tick.php
+          php -l deploy/cpanel/admin/drivers.php
+          php -l deploy/cpanel/admin/verification.php
+          php -l deploy/cpanel/admin/verification-settings.php
+          php -l deploy/cpanel/admin/driver-document.php
+          php -l deploy/cpanel/api/v1/driver/session/index.php
+          php -l deploy/cpanel/api/v1/driver/documents/index.php
+          php -l deploy/cpanel/api/v1/driver/verification/index.php
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Analyze Driver
+        working-directory: apps/driver
+        run: |
+          mkdir -p assets/branding
+          printf '%s' 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZfWQAAAAASUVORK5CYII=' | base64 -d > assets/branding/rado-driver.png
+          flutter pub get
+          flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      - name: Commit integration
+        run: |
+          set -euo pipefail
+          git config user.name "RADO Release Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add deploy/cpanel/admin/_ui.php deploy/cpanel/admin/settings.php deploy/cpanel/admin/drivers.php \
+            deploy/cpanel/rado-system/lib/app.php deploy/cpanel/rado-system/lib/api_ir.php deploy/cpanel/rado-system/lib/tick.php \
+            apps/driver/lib/advanced_driver.dart apps/driver/lib/driver_platform.dart \
+            .github/workflows/release.yml .github/workflows/android-driver.yml .github/workflows/quality.yml
+          if git diff --cached --quiet; then
+            echo "No integration changes to commit"
+            exit 0
+          fi
+          git commit -m "feat(verification): integrate API.ir KYC across driver and admin"
+          git push origin main
