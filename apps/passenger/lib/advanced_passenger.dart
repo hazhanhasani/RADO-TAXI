@@ -661,7 +661,20 @@ class RideApi {
 
   Future<RideRoute> route(LatLng a, LatLng b) async {
     final r = await _dio.get<Map<String, dynamic>>('/api/v1/maps/route/', queryParameters: {'origin': '${a.latitude},${a.longitude}', 'destination': '${b.latitude},${b.longitude}'});
-    return RideRoute(distanceMeters: (r.data?['distance_meters'] as num?)?.toDouble() ?? 0, durationSeconds: (r.data?['duration_seconds'] as num?)?.toDouble() ?? 0);
+    final points = ((r.data?['route_points'] as List?) ?? const [])
+        .whereType<Map>()
+        .map((e) => e.cast<String, dynamic>())
+        .map((e) => LatLng(
+              (e['lat'] as num?)?.toDouble() ?? 0,
+              (e['lng'] as num?)?.toDouble() ?? 0,
+            ))
+        .where((p) => p.latitude.abs() <= 90 && p.longitude.abs() <= 180)
+        .toList(growable: false);
+    return RideRoute(
+      distanceMeters: (r.data?['distance_meters'] as num?)?.toDouble() ?? 0,
+      durationSeconds: (r.data?['duration_seconds'] as num?)?.toDouble() ?? 0,
+      points: points.length >= 2 ? points : [a, b],
+    );
   }
 
   Future<FareInfo> fare(RideRoute route, {required LatLng origin, required LatLng destination, required String clientId, required String promoCode, required String serviceType}) async {
@@ -696,8 +709,9 @@ class RideApi {
 }
 
 class RideRoute {
-  const RideRoute({required this.distanceMeters, required this.durationSeconds});
+  const RideRoute({required this.distanceMeters, required this.durationSeconds, this.points = const []});
   final double distanceMeters, durationSeconds;
+  final List<LatLng> points;
   String get distanceLabel => distanceMeters < 1000 ? '${distanceMeters.round()} متر' : '${(distanceMeters / 1000).toStringAsFixed(1)} کیلومتر';
   String get durationLabel => '${max(1, (durationSeconds / 60).round())} دقیقه';
 }

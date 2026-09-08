@@ -195,9 +195,33 @@ class _RuntimePassengerPageState extends State<RuntimePassengerPage> {
         _route = route;
         _fare = fare;
       });
+      await _fitRoute(route);
     } catch (e) {
       if (mounted) setState(() => _error = _ride.message(e));
     }
+  }
+
+  Future<void> _fitRoute(RideRoute route) async {
+    if (!_mapReady || route.points.length < 2) return;
+    final points = <LatLng>[...route.points];
+    if (_origin != null) points.add(_origin!);
+    if (_destination != null) points.add(_destination!);
+    var north = points.first.latitude;
+    var south = points.first.latitude;
+    var east = points.first.longitude;
+    var west = points.first.longitude;
+    for (final p in points.skip(1)) {
+      north = max(north, p.latitude);
+      south = min(south, p.latitude);
+      east = max(east, p.longitude);
+      west = min(west, p.longitude);
+    }
+    final latPad = max((north - south) * .16, .0012);
+    final lngPad = max((east - west) * .16, .0012);
+    try {
+      await _map.ready.timeout(const Duration(seconds: 3));
+      _map.fitBounds(north + latPad, south - latPad, east + lngPad, west - lngPad);
+    } catch (_) {}
   }
 
   Future<void> _searchPlace({required bool destination, bool addStop = false}) async {
@@ -637,7 +661,15 @@ class _RuntimePassengerPageState extends State<RuntimePassengerPage> {
           body: SafeArea(
             child: Stack(children: [
               Positioned.fill(child: _mapLayer()),
-              if (_trip == null && _mapReady) const Positioned(top: 150, left: 0, right: 0, child: IgnorePointer(child: _Pin())),
+              if (_trip == null && _mapReady)
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: Align(
+                      alignment: Alignment.center,
+                      child: _SelectionPin(destination: _step > 0),
+                    ),
+                  ),
+                ),
               Positioned(top: 12, left: 12, right: 12, child: _header()),
               Positioned(left: 12, right: 12, bottom: 12, child: _trip == null ? _bookingCard() : _trackingCard(_trip!)),
             ]),
@@ -662,8 +694,52 @@ class _RuntimePassengerPageState extends State<RuntimePassengerPage> {
             showCurrentLocationButton: true,
           ),
           markers: [
-            if (_origin != null) NeshanMarker(id: 'origin', position: _origin!, color: Colors.green, title: 'مبدا'),
-            if (_destination != null) NeshanMarker(id: 'destination', position: _destination!, color: Colors.red, title: 'مقصد'),
+            if (_origin != null)
+              NeshanMarker(id: 'origin', position: _origin!, color: Colors.green, title: 'مبدا • $_originLabel'),
+            if (_destination != null)
+              NeshanMarker(id: 'destination', position: _destination!, color: Colors.red, title: 'مقصد • $_destinationLabel'),
+          ],
+          circles: [
+            if (_origin != null)
+              NeshanCircle(
+                id: 'origin-halo',
+                center: _origin!,
+                radius: 28,
+                fillColor: Colors.green,
+                fillOpacity: .12,
+                strokeColor: Colors.green,
+                strokeWidth: 2.5,
+                strokeOpacity: .9,
+              ),
+            if (_destination != null)
+              NeshanCircle(
+                id: 'destination-halo',
+                center: _destination!,
+                radius: 28,
+                fillColor: Colors.red,
+                fillOpacity: .10,
+                strokeColor: Colors.red,
+                strokeWidth: 2.5,
+                strokeOpacity: .9,
+              ),
+          ],
+          polylines: [
+            if (_route != null && _route!.points.length >= 2)
+              NeshanPolyline(
+                id: 'route-shadow',
+                coordinates: _route!.points,
+                color: _black,
+                width: 8,
+                opacity: .72,
+              ),
+            if (_route != null && _route!.points.length >= 2)
+              NeshanPolyline(
+                id: 'route-main',
+                coordinates: _route!.points,
+                color: _yellow,
+                width: 5,
+                opacity: 1,
+              ),
           ],
           onLocationChanged: (lat, lng) => _center = LatLng(lat, lng),
           onError: (message, error, stack) {
@@ -865,6 +941,7 @@ class _PlaceSearchSheetState extends State<_PlaceSearchSheet> {
   final TextEditingController _controller = TextEditingController();
   Timer? _timer;
   bool _loading = false;
+  String? _searchError;
   List<PlaceResult> _items = const [];
 
   @override
@@ -878,13 +955,26 @@ class _PlaceSearchSheetState extends State<_PlaceSearchSheet> {
     _timer?.cancel();
     _timer = Timer(const Duration(milliseconds: 420), () async {
       final q = value.trim();
-      if (q.length < 2) return;
-      setState(() => _loading = true);
+      if (q.length < 2) {
+        if (mounted) setState(() { _items = const []; _searchError = null; });
+        return;
+      }
+      setState(() { _loading = true; _searchError = null; });
       try {
         final list = await widget.platform.searchPlaces(q, widget.near);
-        if (mounted) setState(() => _items = list);
-      } catch (_) {
-        if (mounted) setState(() => _items = const []);
+        if (mounted) {
+          setState(() {
+            _items = list;
+            _searchError = list.isEmpty ? 'نتیجه‌ای در اطراف بانه پیدا نشد.' : null;
+          });
+        }
+      } catch (e) {
+        if (mounted) {
+          setState(() {
+            _items = const [];
+            _searchError = widget.platform.messageFromError(e);
+          });
+        }
       } finally {
         if (mounted) setState(() => _loading = false);
       }
@@ -908,6 +998,18 @@ class _PlaceSearchSheetState extends State<_PlaceSearchSheet> {
                 decoration: const InputDecoration(prefixIcon: Icon(Icons.search), hintText: 'هتل، بیمارستان، پاساژ، خیابان…', border: OutlineInputBorder()),
               ),
               if (_loading) const LinearProgressIndicator(),
+              if (_searchError != null)
+                Container(
+                  width: double.infinity,
+                  margin: const EdgeInsets.only(top: 10),
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(color: const Color(0xFFFFF2F2), borderRadius: BorderRadius.circular(14)),
+                  child: Row(children: [
+                    const Icon(Icons.info_outline_rounded, color: Colors.redAccent),
+                    const SizedBox(width: 8),
+                    Expanded(child: Text(_searchError!, style: const TextStyle(fontSize: 12))),
+                  ]),
+                ),
               const SizedBox(height: 8),
               Expanded(child: ListView.builder(
                 itemCount: _items.length,
@@ -1090,20 +1192,38 @@ class _MiniCard extends StatelessWidget {
       );
 }
 
-class _Pin extends StatelessWidget {
-  const _Pin();
+class _SelectionPin extends StatelessWidget {
+  const _SelectionPin({required this.destination});
+  final bool destination;
 
   @override
-  Widget build(BuildContext context) => Transform.translate(
-        offset: const Offset(0, -24),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Container(
-            width: 52,
-            height: 52,
-            decoration: BoxDecoration(color: _yellow, shape: BoxShape.circle, border: Border.all(color: _black, width: 4)),
-            child: const Icon(Icons.local_taxi_rounded, size: 28),
+  Widget build(BuildContext context) {
+    final color = destination ? Colors.red : Colors.green;
+    final icon = destination ? Icons.location_on_rounded : Icons.radio_button_checked_rounded;
+    final label = destination ? 'مقصد' : 'مبدا';
+    return Transform.translate(
+      offset: const Offset(0, -38),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
+          decoration: BoxDecoration(color: _black, borderRadius: BorderRadius.circular(14)),
+          child: Text(label, style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w900)),
+        ),
+        const SizedBox(height: 4),
+        Container(
+          width: 54,
+          height: 54,
+          decoration: BoxDecoration(
+            color: Colors.white,
+            shape: BoxShape.circle,
+            border: Border.all(color: color, width: 5),
+            boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 9, offset: Offset(0, 4))],
           ),
-          Container(width: 4, height: 20, color: _black),
-        ]),
-      );
+          child: Icon(icon, color: color, size: destination ? 30 : 27),
+        ),
+        Container(width: 4, height: 18, color: color),
+        Container(width: 10, height: 10, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+      ]),
+    );
+  }
 }
