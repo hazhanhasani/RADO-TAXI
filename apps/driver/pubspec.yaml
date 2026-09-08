@@ -1,7 +1,7 @@
 name: rado_driver
 description: RADO Driver app
 publish_to: none
-version: 0.6.1+6001
+version: 0.6.2+6002
 
 environment:
   sdk: '>=3.10.0 <4.0.0'
@@ -9,6 +9,7 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  cupertino_icons: ^1.0.8
   dio: ^5.8.0+1
   file_picker: ^10.1.9
   flutter_local_notifications: ^19.5.0
