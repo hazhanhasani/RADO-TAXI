@@ -89,6 +89,7 @@ INSERT INTO system_settings(setting_key,setting_value,is_secret) VALUES
 ('api_ir_speech_text','من با آگاهی کامل قوانین رانندگی رادو را می‌پذیرم',0),
 ('driver_verification_require_driving_score','1',0),
 ('driver_verification_require_active_plates','0',0),
+('driver_verification_enforced','1',0),
 ('driver_verification_terms_version','2026-09-08',0)
 ON DUPLICATE KEY UPDATE setting_key=VALUES(setting_key);
 
