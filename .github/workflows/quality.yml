@@ -41,6 +41,7 @@ jobs:
           test -f deploy/cpanel/admin/support.php
           test -f deploy/cpanel/admin/reports.php
           test -f deploy/cpanel/admin/system.php
+          test -f deploy/cpanel/admin/settings.php
           test -f deploy/cpanel/admin/platform.php
           test -f deploy/cpanel/admin/dispatch.php
           test -f deploy/cpanel/admin/live-map.php
@@ -67,7 +68,13 @@ jobs:
         run: |
           grep -q "/admin/dashboard.php" deploy/cpanel/admin/index.php
           grep -q "/admin/operations.php" deploy/cpanel/admin/_ui.php
+          grep -q "/admin/settings.php" deploy/cpanel/admin/_ui.php
           grep -q "/admin/system.php" deploy/cpanel/admin/_ui.php
+          grep -Fq ".nav{display:flex" deploy/cpanel/admin/_ui.php
+          grep -Fq "overflow-x:auto" deploy/cpanel/admin/_ui.php
+          grep -Fq "require __DIR__.'/_ui.php'" deploy/cpanel/admin/maps.php
+          grep -Fq "require __DIR__.'/_ui.php'" deploy/cpanel/admin/live-map.php
+          grep -Fq "require __DIR__.'/_ui.php'" deploy/cpanel/admin/settings.php
           grep -q "آخرین Release" deploy/cpanel/admin/system.php
           grep -q "در جستجوی راننده" deploy/cpanel/admin/operations.php
 
