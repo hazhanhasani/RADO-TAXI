@@ -1,7 +1,7 @@
 name: rado_passenger
 description: RADO Passenger - ride hailing app for Baneh
 publish_to: none
-version: 0.6.2+6002
+version: 0.6.3+6003
 
 environment:
   sdk: '>=3.10.0 <4.0.0'
@@ -11,28 +11,31 @@ dependencies:
     sdk: flutter
   cupertino_icons: ^1.0.8
   dio: ^5.8.0+1
-  flutter_local_notifications: ^19.5.0
   geolocator: ^14.0.2
-  latlong2: ^0.10.1
+  flutter_local_notifications: ^19.5.0
+  intl: ^0.20.2
+  latlong2: ^0.9.1
   neshan_maps_flutter: ^1.1.0
-  package_info_plus: ^8.1.2
+  package_info_plus: ^8.3.0
   shared_preferences: ^2.5.3
-  url_launcher: ^6.3.1
+  url_launcher: ^6.3.2
+  uuid: ^4.5.1
+  webview_flutter: ^4.13.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
-  flutter_launcher_icons: ^0.14.3
-
-flutter_launcher_icons:
-  android: true
-  ios: false
-  image_path: "assets/branding/rado-passenger.png"
-  adaptive_icon_background: "#171717"
-  adaptive_icon_foreground: "assets/branding/rado-passenger.png"
+  flutter_launcher_icons: ^0.14.4
 
 flutter:
   uses-material-design: true
   assets:
     - assets/branding/rado-passenger.png
+
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: assets/branding/rado-passenger.png
+  adaptive_icon_background: '#171717'
+  adaptive_icon_foreground: assets/branding/rado-passenger.png
