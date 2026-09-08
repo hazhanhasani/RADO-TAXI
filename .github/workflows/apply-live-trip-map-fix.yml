@@ -26,9 +26,10 @@ jobs:
           cache: true
       - name: Apply deterministic live tracking patch
         run: python3 scripts/apply_live_trip_map_fix.py
-      - name: Validate patch shape
+      - name: Format and validate patch shape
         run: |
           set -euo pipefail
+          dart format apps/passenger/lib/runtime_passenger.dart apps/passenger/lib/live_trip.dart apps/passenger/lib/app_notifications.dart apps/driver/lib/advanced_driver.dart apps/driver/lib/app_notifications.dart
           grep -q "updateMarkers(_mapMarkers())" apps/passenger/lib/runtime_passenger.dart
           grep -q "driver-route-live" apps/passenger/lib/runtime_passenger.dart
           grep -q "PassengerRealtimeApi" apps/passenger/lib/runtime_passenger.dart
@@ -39,7 +40,6 @@ jobs:
           grep -q "راننده سفر را پذیرفت" deploy/cpanel/api/v1/driver/offers/index.php
           grep -q "trip_completed" deploy/cpanel/api/v1/driver/trip/index.php
           grep -q "passenger_id,destination_lat" deploy/cpanel/rado-system/lib/platform.php
-          dart format --output=none --set-exit-if-changed apps/passenger/lib/runtime_passenger.dart apps/passenger/lib/live_trip.dart apps/passenger/lib/app_notifications.dart apps/driver/lib/advanced_driver.dart apps/driver/lib/app_notifications.dart
           php -l deploy/cpanel/api/v1/driver/offers/index.php
           php -l deploy/cpanel/api/v1/driver/trip/index.php
           php -l deploy/cpanel/rado-system/lib/platform.php
@@ -49,7 +49,7 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add apps/passenger/lib/runtime_passenger.dart apps/driver/lib/advanced_driver.dart deploy/cpanel/api/v1/driver/offers/index.php deploy/cpanel/api/v1/driver/trip/index.php deploy/cpanel/rado-system/lib/platform.php
+          git add apps/passenger/lib/runtime_passenger.dart apps/passenger/lib/live_trip.dart apps/passenger/lib/app_notifications.dart apps/driver/lib/advanced_driver.dart apps/driver/lib/app_notifications.dart deploy/cpanel/api/v1/driver/offers/index.php deploy/cpanel/api/v1/driver/trip/index.php deploy/cpanel/rado-system/lib/platform.php
           if git diff --cached --quiet; then
             echo "Live trip source already patched"
             exit 0
