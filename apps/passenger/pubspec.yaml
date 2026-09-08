@@ -1,7 +1,7 @@
 name: rado_passenger
 description: RADO Passenger - ride hailing app for Baneh
 publish_to: none
-version: 0.4.5+4005
+version: 0.4.6+4006
 
 environment:
   sdk: '>=3.10.0 <4.0.0'
