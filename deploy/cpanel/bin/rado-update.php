@@ -17,44 +17,50 @@ if ($bootstrapLock && flock($bootstrapLock, LOCK_EX | LOCK_NB)) {
         $ua = (string)($config['user_agent'] ?? 'RADO-Updater-Bootstrap');
 
         $get = static function (string $url) use ($ua): string {
-            $ch = curl_init($url);
-            curl_setopt_array($ch, [
-                CURLOPT_RETURNTRANSFER => true,
-                CURLOPT_FOLLOWLOCATION => true,
-                CURLOPT_CONNECTTIMEOUT => 10,
-                CURLOPT_TIMEOUT => 60,
-                CURLOPT_HTTPHEADER => ['Accept: application/vnd.github+json', 'User-Agent: ' . $ua],
-            ]);
-            $body = curl_exec($ch);
-            $code = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-            $err = curl_error($ch);
-            curl_close($ch);
-            if ($body === false || $code < 200 || $code >= 300) {
-                throw new RuntimeException("Bootstrap HTTP $code: $err");
+            $last='';
+            for($attempt=1;$attempt<=3;$attempt++){
+                $ch = curl_init($url);
+                curl_setopt_array($ch, [
+                    CURLOPT_RETURNTRANSFER => true,
+                    CURLOPT_FOLLOWLOCATION => true,
+                    CURLOPT_CONNECTTIMEOUT => 12,
+                    CURLOPT_TIMEOUT => 75,
+                    CURLOPT_HTTPHEADER => ['Accept: application/vnd.github+json', 'User-Agent: ' . $ua],
+                ]);
+                $body = curl_exec($ch);
+                $code = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+                $err = curl_error($ch);
+                curl_close($ch);
+                if ($body !== false && $code >= 200 && $code < 300) return (string)$body;
+                $last = "Bootstrap HTTP $code" . ($err!=='' ? ': '.$err : '');
+                if($attempt<3) usleep(350000*$attempt);
             }
-            return (string)$body;
+            throw new RuntimeException($last!==''?$last:'Bootstrap request failed');
         };
 
-        $download = static function (string $url, string $dest, int $timeout = 120) use ($ua): void {
-            $fp = fopen($dest, 'wb');
-            if (!$fp) throw new RuntimeException('Bootstrap cannot create temporary file');
-            $ch = curl_init($url);
-            curl_setopt_array($ch, [
-                CURLOPT_FILE => $fp,
-                CURLOPT_FOLLOWLOCATION => true,
-                CURLOPT_CONNECTTIMEOUT => 10,
-                CURLOPT_TIMEOUT => $timeout,
-                CURLOPT_HTTPHEADER => ['User-Agent: ' . $ua],
-            ]);
-            $ok = curl_exec($ch);
-            $code = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-            $err = curl_error($ch);
-            curl_close($ch);
-            fclose($fp);
-            if (!$ok || $code < 200 || $code >= 300) {
-                @unlink($dest);
-                throw new RuntimeException("Bootstrap download failed ($code): $err");
+        $download = static function (string $url, string $dest, int $timeout = 180) use ($ua): void {
+            $last='';
+            for($attempt=1;$attempt<=3;$attempt++){
+                $part=$dest.'.part';@unlink($part);
+                $fp = fopen($part, 'wb');
+                if (!$fp) throw new RuntimeException('Bootstrap cannot create temporary file');
+                $ch = curl_init($url);
+                curl_setopt_array($ch, [
+                    CURLOPT_FILE => $fp,
+                    CURLOPT_FOLLOWLOCATION => true,
+                    CURLOPT_CONNECTTIMEOUT => 12,
+                    CURLOPT_TIMEOUT => $timeout,
+                    CURLOPT_HTTPHEADER => ['User-Agent: ' . $ua],
+                ]);
+                $ok = curl_exec($ch);
+                $code = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+                $err = curl_error($ch);
+                curl_close($ch);fclose($fp);
+                if($ok&&$code>=200&&$code<300){@unlink($dest);if(!rename($part,$dest)){@unlink($part);throw new RuntimeException('Bootstrap cannot activate temporary download');}return;}
+                @unlink($part);$last="Bootstrap download failed ($code)".($err!==''?': '.$err:'');
+                if($attempt<3) usleep(500000*$attempt);
             }
+            throw new RuntimeException($last!==''?$last:'Bootstrap download failed');
         };
 
         $release = json_decode($get($api . '/repos/' . $repo . '/releases/latest'), true, 512, JSON_THROW_ON_ERROR);
@@ -69,7 +75,7 @@ if ($bootstrapLock && flock($bootstrapLock, LOCK_EX | LOCK_NB)) {
         $metaAsset = $findAsset($assets, 'RADO-release.json');
         if (!$metaAsset) throw new RuntimeException('Bootstrap release manifest missing');
         $tmpMeta = tempnam(sys_get_temp_dir(), 'rado-bootstrap-meta-');
-        $download((string)$metaAsset['browser_download_url'], $tmpMeta, 60);
+        $download((string)$metaAsset['browser_download_url'], $tmpMeta, 90);
         $meta = json_decode((string)file_get_contents($tmpMeta), true, 512, JSON_THROW_ON_ERROR);
         @unlink($tmpMeta);
 
@@ -81,7 +87,7 @@ if ($bootstrapLock && flock($bootstrapLock, LOCK_EX | LOCK_NB)) {
         $installedBootstrapTag = is_file($stateDir . '/bootstrap_version') ? trim((string)file_get_contents($stateDir . '/bootstrap_version')) : '';
         if (!is_file($coreFile) || $installedBootstrapTag !== $tag) {
             $tmpZip = tempnam(sys_get_temp_dir(), 'rado-bootstrap-cp-');
-            $download((string)$cpAsset['browser_download_url'], $tmpZip, 120);
+            $download((string)$cpAsset['browser_download_url'], $tmpZip, 180);
             $actualSha = (string)hash_file('sha256', $tmpZip);
             if (!hash_equals($cpSha, $actualSha)) {
                 @unlink($tmpZip);
@@ -101,18 +107,22 @@ if ($bootstrapLock && flock($bootstrapLock, LOCK_EX | LOCK_NB)) {
             }
 
             $newCore = $coreFile . '.new';
-            if (file_put_contents($newCore, $corePayload, LOCK_EX) === false) {
-                throw new RuntimeException('Bootstrap cannot stage updater core');
-            }
+            if (file_put_contents($newCore, $corePayload, LOCK_EX) === false) throw new RuntimeException('Bootstrap cannot stage updater core');
             if (!rename($newCore, $coreFile)) {
                 @unlink($newCore);
                 throw new RuntimeException('Bootstrap cannot activate updater core');
             }
             file_put_contents($stateDir . '/bootstrap_version', $tag . "\n", LOCK_EX);
-            @unlink($stateDir . '/bootstrap_error.log');
         }
+        @unlink($stateDir . '/bootstrap_error_current.log');
+        @file_put_contents($stateDir . '/bootstrap_error.log', '', LOCK_EX);
     } catch (Throwable $e) {
-        @file_put_contents($stateDir . '/bootstrap_error.log', '[' . date('c') . '] ' . $e->getMessage() . "\n", FILE_APPEND | LOCK_EX);
+        $line='[' . date('c') . '] ' . $e->getMessage() . "\n";
+        @file_put_contents($stateDir . '/bootstrap_error_current.log', $line, LOCK_EX);
+        $history=$stateDir . '/bootstrap_error.log';
+        $old=is_file($history)?(string)@file_get_contents($history):'';
+        $combined=$old.$line;if(strlen($combined)>16000)$combined=substr($combined,-16000);
+        @file_put_contents($history,$combined,LOCK_EX);
         // A transient bootstrap failure must not block the last known-good update engine.
     } finally {
         flock($bootstrapLock, LOCK_UN);
