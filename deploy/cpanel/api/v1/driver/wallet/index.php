@@ -6,8 +6,8 @@ if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
     rado_json(405, ['ok'=>false,'error'=>'method_not_allowed']);
 }
 
+$clientId = trim((string)($_GET['client_id'] ?? ''));
 try {
-    $clientId = trim((string)($_GET['client_id'] ?? ''));
     $pdo = rado_db();
     $driver = rado_driver_from_client($pdo, $clientId);
     if ($driver === null) $driver = rado_guest_driver($pdo, $clientId);
@@ -38,6 +38,7 @@ try {
 
     rado_json(200, [
         'ok'=>true,
+        'degraded'=>false,
         'wallet'=>[
             'balance'=>$balance,
             'commission_rate'=>(float)($driver['commission_rate'] ?? 0),
@@ -50,5 +51,28 @@ try {
         'server_time'=>rado_time_payload(),
     ]);
 } catch (Throwable $e) {
-    rado_json(500, ['ok'=>false,'error'=>'driver_wallet_failed']);
+    // Wallet/reporting is non-critical for receiving a trip offer. Return a safe
+    // degraded payload so the driver app can still render dispatch state.
+    $commission = 0.0;
+    try {
+        if (isset($pdo) && $pdo instanceof PDO) {
+            $driver = rado_driver_from_client($pdo, $clientId);
+            $commission = is_array($driver) ? (float)($driver['commission_rate'] ?? 0) : 0.0;
+        }
+        $dir=rado_root().'/rado-system/state';@mkdir($dir,0755,true);@file_put_contents($dir.'/driver-wallet-errors.log','['.rado_jalali_datetime(null,true).'] '.$e->getMessage()."\n",FILE_APPEND|LOCK_EX);
+    } catch (Throwable) {}
+    rado_json(200, [
+        'ok'=>true,
+        'degraded'=>true,
+        'wallet'=>[
+            'balance'=>0,
+            'commission_rate'=>$commission,
+            'today_gross'=>0,
+            'today_commission'=>0,
+            'today_net'=>0,
+            'today_trips'=>0,
+            'entries'=>[],
+        ],
+        'server_time'=>rado_time_payload(),
+    ]);
 }
