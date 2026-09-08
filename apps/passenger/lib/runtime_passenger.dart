@@ -13,6 +13,7 @@ import 'advanced_passenger.dart'
 import 'app_notifications.dart';
 import 'live_trip.dart';
 import 'platform_features.dart';
+import 'realtime_stream.dart';
 
 const _yellow = Color(0xFFF7B500);
 const _black = Color(0xFF171717);
@@ -70,6 +71,7 @@ class _RuntimePassengerPageState extends State<RuntimePassengerPage> {
   int _lastEventId = 0;
   bool _polling = false;
   DateTime? _lastDriverRouteAt;
+  RadoRealtimeStream? _tripStream;
 
   @override
   void initState() {
@@ -80,6 +82,7 @@ class _RuntimePassengerPageState extends State<RuntimePassengerPage> {
   @override
   void dispose() {
     _poller?.cancel();
+    _tripStream?.close();
     _map.dispose();
     super.dispose();
   }
@@ -350,7 +353,8 @@ class _RuntimePassengerPageState extends State<RuntimePassengerPage> {
         _lastDriverRouteAt = null;
       });
       _poller?.cancel();
-      _poller = Timer.periodic(const Duration(seconds: 3), (_) => _poll());
+      _startTripRealtime(trip.id);
+      _poller = Timer.periodic(const Duration(seconds: 20), (_) => _poll());
       await _syncMapOverlays();
       await _poll();
       _show('درخواست برای رانندگان نزدیک ارسال شد.');
@@ -359,6 +363,59 @@ class _RuntimePassengerPageState extends State<RuntimePassengerPage> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  void _startTripRealtime(String tripId) {
+    final id = _clientId;
+    if (id == null) return;
+    _tripStream?.close();
+    final stream = RadoRealtimeStream(_apiBase);
+    _tripStream = stream;
+    unawaited(
+      stream.listen(
+        query: {'role': 'passenger', 'client_id': id, 'trip_id': tripId},
+        onEvent: (event) async {
+          if (!mounted || _trip?.id != tripId) return;
+          if (event.name != 'rado_event') return;
+          final type = (event.data['event_type'] ?? '').toString();
+          final rawPayload = event.data['payload'];
+          final payload = rawPayload is Map
+              ? rawPayload.cast<String, dynamic>()
+              : const <String, dynamic>{};
+          if (type == 'driver_location' &&
+              payload['lat'] is num &&
+              payload['lng'] is num) {
+            final current = _live;
+            if (current != null) {
+              final created = event.data['created_at'];
+              final createdAt = created is Map
+                  ? (created['jalali'] ?? '').toString()
+                  : '';
+              setState(() {
+                _live = LiveTripSnapshot(
+                  status: current.status,
+                  driverPosition: LiveDriverPosition(
+                    lat: (payload['lat'] as num).toDouble(),
+                    lng: (payload['lng'] as num).toDouble(),
+                    heading: (payload['heading'] as num?)?.toInt(),
+                    speedKph: (payload['speed_kph'] as num?)?.toDouble(),
+                    updatedAt: createdAt,
+                  ),
+                  eta: current.eta,
+                  driverProfile: current.driverProfile,
+                  events: current.events,
+                );
+              });
+              final trip = _trip;
+              if (trip != null) await _updateDriverRoute(trip);
+              await _syncMapOverlays();
+              return;
+            }
+          }
+          await _poll();
+        },
+      ),
+    );
   }
 
   Future<void> _poll() async {
@@ -388,7 +445,11 @@ class _RuntimePassengerPageState extends State<RuntimePassengerPage> {
       if (oldStatus != fresh.status) await _notifyTripTransition(fresh);
       await _updateDriverRoute(fresh);
       await _syncMapOverlays();
-      if (fresh.terminal) _poller?.cancel();
+      if (fresh.terminal) {
+        _poller?.cancel();
+        _tripStream?.close();
+        _tripStream = null;
+      }
     } catch (_) {
       // A transient poll failure must never remove the last known live position.
     } finally {
@@ -590,6 +651,8 @@ class _RuntimePassengerPageState extends State<RuntimePassengerPage> {
       if (!mounted) return;
       setState(() => _trip = fresh);
       _poller?.cancel();
+      _tripStream?.close();
+      _tripStream = null;
     } catch (e) {
       _show(_ride.message(e));
     }
@@ -1032,6 +1095,8 @@ class _RuntimePassengerPageState extends State<RuntimePassengerPage> {
 
   void _reset() {
     _poller?.cancel();
+    _tripStream?.close();
+    _tripStream = null;
     setState(() {
       _origin = null;
       _destination = null;

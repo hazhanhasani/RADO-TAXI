@@ -3,11 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 class RadoRealtimeEvent {
-  const RadoRealtimeEvent({
-    required this.name,
-    required this.data,
-    this.id,
-  });
+  const RadoRealtimeEvent({required this.name, required this.data, this.id});
 
   final String name;
   final Map<String, dynamic> data;
@@ -16,9 +12,9 @@ class RadoRealtimeEvent {
 
 class RadoRealtimeStream {
   RadoRealtimeStream(String baseUrl)
-      : _baseUrl = baseUrl.endsWith('/')
-            ? baseUrl.substring(0, baseUrl.length - 1)
-            : baseUrl;
+    : _baseUrl = baseUrl.endsWith('/')
+          ? baseUrl.substring(0, baseUrl.length - 1)
+          : baseUrl;
 
   final String _baseUrl;
   HttpClient? _client;
@@ -42,9 +38,8 @@ class RadoRealtimeStream {
           'stream': '1',
           if (_lastEventId > 0) 'since_event_id': '$_lastEventId',
         };
-        final uri = Uri.parse('$_baseUrl/api/v1/realtime/').replace(
-          queryParameters: params,
-        );
+        final uri = Uri.parse('$_baseUrl/api/v1/realtime/')
+            .replace(queryParameters: params);
         final request = await client.getUrl(uri);
         request.headers.set(HttpHeaders.acceptHeader, 'text/event-stream');
         request.headers.set(HttpHeaders.cacheControlHeader, 'no-cache');
@@ -91,9 +86,10 @@ class RadoRealtimeStream {
           data.clear();
         }
 
-        await for (final line in response
-            .transform(utf8.decoder)
-            .transform(const LineSplitter())) {
+        await for (final line
+            in response
+                .transform(utf8.decoder)
+                .transform(const LineSplitter())) {
           if (_closed) break;
           if (line.isEmpty) {
             await dispatch();
@@ -115,7 +111,7 @@ class RadoRealtimeStream {
 
       if (_closed) break;
       await Future<void>.delayed(Duration(seconds: backoffSeconds));
-      backoffSeconds = (backoffSeconds * 2).clamp(1, 8);
+      backoffSeconds = (backoffSeconds * 2).clamp(1, 8).toInt();
     }
   }
 

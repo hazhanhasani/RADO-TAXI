@@ -7,6 +7,10 @@ function rado_platform_event(PDO $pdo,string $channel,string $type,array $payloa
 }
 function rado_platform_notify(PDO $pdo,string $userId,string $title,string $body,string $type='general',array $data=[]):void{
   try{$pdo->prepare('INSERT INTO notifications(user_id,title,body,type,data_json) VALUES(?,?,?,?,?)')->execute([$userId,$title,$body,$type,$data?json_encode($data,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES):null]);}catch(Throwable){}
+  // Wake a driver's private realtime stream for server-side assignments. Publishing
+  // to a driver:* channel is harmless for passenger IDs because nobody can subscribe
+  // to that channel without a valid driver identity.
+  if($type==='trip_assigned'){rado_platform_event($pdo,'driver:'.$userId,'trip_assigned',$data,600);}
 }
 function rado_dispatch_settings(PDO $pdo):array{
   return [

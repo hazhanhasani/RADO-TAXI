@@ -10,10 +10,15 @@ import 'package:url_launcher/url_launcher.dart';
 
 import 'app_notifications.dart';
 import 'driver_platform.dart';
+import 'realtime_stream.dart';
 
 const _yellow = Color(0xFFF7B500);
 const _black = Color(0xFF171717);
 const _surface = Color(0xFFF6F6F4);
+const _apiBase = String.fromEnvironment(
+  'RADO_API_BASE_URL',
+  defaultValue: 'https://rado-taxi.sbs',
+);
 
 class AdvancedDriverPage extends StatefulWidget {
   const AdvancedDriverPage({super.key});
@@ -42,6 +47,11 @@ class _AdvancedDriverPageState extends State<AdvancedDriverPage> {
   Timer? _timer;
   int? _lastNotifiedOfferId;
   String? _lastNotifiedTripStatus;
+  bool _refreshing = false;
+  DateTime? _lastFallbackRefresh;
+  RadoRealtimeStream? _driverStream;
+  RadoRealtimeStream? _tripStream;
+  String? _streamTripId;
 
   bool get _approved => _session?.approved == true;
 
@@ -54,6 +64,8 @@ class _AdvancedDriverPageState extends State<AdvancedDriverPage> {
   @override
   void dispose() {
     _timer?.cancel();
+    _driverStream?.close();
+    _tripStream?.close();
     super.dispose();
   }
 
@@ -71,12 +83,67 @@ class _AdvancedDriverPageState extends State<AdvancedDriverPage> {
         await _notifications.init();
       } catch (_) {}
       await _refresh(all: true);
-      _timer = Timer.periodic(const Duration(seconds: 5), (_) => _tick());
+      _startDriverRealtime();
+      _scheduleTick();
     } catch (e) {
       _show(_api.message(e));
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  void _scheduleTick() {
+    _timer?.cancel();
+    final delay = _trip == null
+        ? const Duration(seconds: 5)
+        : const Duration(seconds: 2);
+    _timer = Timer(delay, () async {
+      await _tick();
+      if (mounted) _scheduleTick();
+    });
+  }
+
+  void _startDriverRealtime() {
+    final id = _clientId;
+    if (id == null) return;
+    _driverStream?.close();
+    final stream = RadoRealtimeStream(_apiBase);
+    _driverStream = stream;
+    unawaited(
+      stream.listen(
+        query: {'role': 'driver', 'client_id': id, 'scope': 'driver'},
+        onEvent: (event) async {
+          if (!mounted || event.name != 'rado_event') return;
+          final type = (event.data['event_type'] ?? '').toString();
+          if (type == 'presence') return;
+          await _refresh();
+        },
+      ),
+    );
+  }
+
+  void _syncTripRealtime(DriverTrip? trip) {
+    final id = _clientId;
+    final tripId = trip?.id;
+    if (id == null || tripId == _streamTripId) return;
+    _tripStream?.close();
+    _tripStream = null;
+    _streamTripId = tripId;
+    if (tripId == null || tripId.isEmpty) return;
+    final stream = RadoRealtimeStream(_apiBase);
+    _tripStream = stream;
+    unawaited(
+      stream.listen(
+        query: {'role': 'driver', 'client_id': id, 'trip_id': tripId},
+        onEvent: (event) async {
+          if (!mounted || _streamTripId != tripId) return;
+          if (event.name != 'rado_event') return;
+          final type = (event.data['event_type'] ?? '').toString();
+          if (type == 'driver_location') return;
+          await _refresh(all: type == 'completed');
+        },
+      ),
+    );
   }
 
   Future<bool> _locationPermission() async {
@@ -102,9 +169,9 @@ class _AdvancedDriverPageState extends State<AdvancedDriverPage> {
     try {
       if (_online && _approved && await _locationPermission()) {
         final p = await Geolocator.getCurrentPosition(
-          locationSettings: const LocationSettings(
+          locationSettings: LocationSettings(
             accuracy: LocationAccuracy.high,
-            distanceFilter: 10,
+            distanceFilter: _trip == null ? 12 : 3,
           ),
         );
         await _api.presence(
@@ -116,7 +183,12 @@ class _AdvancedDriverPageState extends State<AdvancedDriverPage> {
           speedKph: max(0, p.speed * 3.6),
         );
       }
-      await _refresh();
+      final now = DateTime.now();
+      if (_lastFallbackRefresh == null ||
+          now.difference(_lastFallbackRefresh!).inSeconds >= 20) {
+        _lastFallbackRefresh = now;
+        await _refresh();
+      }
     } catch (_) {
       // Temporary location/network failures must not close the driver app.
     }
@@ -124,7 +196,8 @@ class _AdvancedDriverPageState extends State<AdvancedDriverPage> {
 
   Future<void> _refresh({bool all = false}) async {
     final id = _clientId;
-    if (id == null) return;
+    if (id == null || _refreshing) return;
+    _refreshing = true;
     try {
       final session = await _api.session(id);
       final state = session.approved
@@ -164,6 +237,7 @@ class _AdvancedDriverPageState extends State<AdvancedDriverPage> {
         _documents = documents;
         _tickets = tickets;
       });
+      _syncTripRealtime(incomingTrip);
       final unread = serverNotifications
           .where((n) => !n.read)
           .take(3)
@@ -220,6 +294,8 @@ class _AdvancedDriverPageState extends State<AdvancedDriverPage> {
       if (status != null) _lastNotifiedTripStatus = status;
     } catch (e) {
       if (all) _show(_api.message(e));
+    } finally {
+      _refreshing = false;
     }
   }
 
@@ -400,10 +476,46 @@ class _AdvancedDriverPageState extends State<AdvancedDriverPage> {
                     keyboardType: TextInputType.number,
                     decoration: const InputDecoration(labelText: 'حداقل کرایه'),
                   ),
-                  SwitchListTile(
-                    value: auto,
-                    onChanged: (v) => setLocal(() => auto = v),
-                    title: const Text('پذیرش خودکار'),
+                  const SizedBox(height: 14),
+                  const Align(
+                    alignment: Alignment.centerRight,
+                    child: Text(
+                      'حالت انتخاب مسافر',
+                      style: TextStyle(fontWeight: FontWeight.w900),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: SegmentedButton<bool>(
+                      segments: const [
+                        ButtonSegment<bool>(
+                          value: false,
+                          icon: Icon(Icons.touch_app_rounded),
+                          label: Text('دستی'),
+                        ),
+                        ButtonSegment<bool>(
+                          value: true,
+                          icon: Icon(Icons.bolt_rounded),
+                          label: Text('خودکار'),
+                        ),
+                      ],
+                      selected: {auto},
+                      onSelectionChanged: (value) =>
+                          setLocal(() => auto = value.first),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8, bottom: 4),
+                    child: Text(
+                      auto
+                          ? 'در حالت خودکار، RADO فقط سفرهایی را که با شرط‌های زیر هماهنگ باشند برای شما می‌پذیرد.'
+                          : 'در حالت دستی، درخواست‌های نزدیک نمایش داده می‌شوند و انتخاب نهایی با شماست.',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Colors.black54,
+                      ),
+                    ),
                   ),
                   if (auto) ...[
                     TextField(
