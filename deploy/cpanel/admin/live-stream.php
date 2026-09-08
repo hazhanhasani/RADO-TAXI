@@ -57,13 +57,14 @@ try {
         "SELECT id,channel,event_type,payload_json,created_at
          FROM realtime_events
          WHERE id>? AND expires_at>NOW()
-           AND (channel LIKE 'trip:%' OR channel LIKE 'driver:%')
+           AND (channel LIKE 'trip:%' OR channel LIKE 'ops:%')
          ORDER BY id ASC
-         LIMIT 150"
+         LIMIT 300"
     );
 
-    // Shared-hosting safe: keep each PHP request short. EventSource reconnects
-    // automatically and resumes from Last-Event-ID without a visible refresh.
+    // One office TV consumes this short SSE connection. A larger batch and a
+    // 350ms drain interval keep up with the 200-driver load profile while still
+    // releasing the PHP worker every 24 seconds for shared-hosting safety.
     while (!connection_aborted() && microtime(true) - $started < 24.0) {
         $stmt->execute([$lastId]);
         $rows = $stmt->fetchAll();
@@ -90,7 +91,7 @@ try {
             $heartbeatAt = $now;
         }
 
-        usleep(500000);
+        usleep(350000);
     }
 
     rado_sse_send('reconnect', ['last_event_id' => $lastId]);
