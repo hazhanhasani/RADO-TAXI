@@ -77,5 +77,14 @@ function rado_run_database_migrations(string $root): array
     $pdo->exec("INSERT INTO system_settings(setting_key,setting_value,is_secret) VALUES('default_driver_commission_rate','10.00',0) ON DUPLICATE KEY UPDATE setting_key=VALUES(setting_key)");
     $pdo->exec("INSERT INTO schema_migrations(version) VALUES ('cpanel-mysql-0.4.1-shared-hosting-safe') ON DUPLICATE KEY UPDATE version=VALUES(version)");
 
+    // Never report a successful KYC migration unless the required tables are really present.
+    $tableCheck = $pdo->prepare('SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=?');
+    foreach (['driver_verification_profiles','driver_verification_checks','driver_verification_corrections'] as $requiredTable) {
+        $tableCheck->execute([$requiredTable]);
+        if ((int)$tableCheck->fetchColumn() === 0) {
+            throw new RuntimeException('Migration verification failed; missing table: ' . $requiredTable);
+        }
+    }
+
     return ['ok' => true, 'files' => $applied];
 }

@@ -26,7 +26,11 @@ function ra_state(string $name, string $fallback='—'): string {
     return $v!==''?$v:$fallback;
 }
 function ra_table_exists(PDO $pdo, string $table): bool {
-    try { $s=$pdo->prepare('SHOW TABLES LIKE ?'); $s->execute([$table]); return (bool)$s->fetchColumn(); } catch(Throwable) { return false; }
+    try {
+        $s=$pdo->prepare('SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=?');
+        $s->execute([$table]);
+        return (int)$s->fetchColumn() > 0;
+    } catch(Throwable) { return false; }
 }
 function ra_scalar(PDO $pdo, string $sql, int|float $fallback=0): int|float {
     try { $v=$pdo->query($sql)->fetchColumn(); return is_numeric($v)?$v:$fallback; } catch(Throwable) { return $fallback; }
