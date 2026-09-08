@@ -1,0 +1,49 @@
+name: Apply KYC Schema Fix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.maintenance/APPLY_KYC_SCHEMA_FIX'
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply reliable schema detection fix
+        run: python3 scripts/apply_kyc_schema_fix.py
+
+      - name: PHP lint
+        run: |
+          php -l deploy/cpanel/admin/_ui.php
+          php -l deploy/cpanel/rado-system/lib/migrate.php
+          php -l deploy/cpanel/admin/system.php
+          php -l deploy/cpanel/admin/verification.php
+
+      - name: Verify fix
+        run: |
+          grep -F "information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=?" deploy/cpanel/admin/_ui.php
+          grep -F "Migration verification failed; missing table:" deploy/cpanel/rado-system/lib/migrate.php
+          ! grep -F "SHOW TABLES LIKE ?" deploy/cpanel/admin/_ui.php
+
+      - name: Commit fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "RADO Release Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add deploy/cpanel/admin/_ui.php deploy/cpanel/rado-system/lib/migrate.php
+          if git diff --cached --quiet; then
+            echo "No changes required"
+            exit 0
+          fi
+          git commit -m "fix(kyc): make schema detection reliable on MySQL PDO"
+          git push origin main
