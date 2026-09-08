@@ -170,10 +170,20 @@ class _RuntimePassengerPageState extends State<RuntimePassengerPage> {
   Future<LatLng> _exactCenter() async {
     if (!_mapReady) return _center;
     try {
+      await _map.ready.timeout(const Duration(seconds: 3));
+      // The Neshan map runs inside a WebView. Give the final camera frame a
+      // moment to settle, then read the centre twice so a fast drag + confirm
+      // cannot save the previous frame's coordinate.
+      await Future<void>.delayed(const Duration(milliseconds: 90));
       final point = await _map.getCurrentLocation().timeout(
         const Duration(seconds: 3),
       );
       if (point != null) _center = point;
+      await Future<void>.delayed(const Duration(milliseconds: 40));
+      final verified = await _map.getCurrentLocation().timeout(
+        const Duration(seconds: 2),
+      );
+      if (verified != null) _center = verified;
     } catch (_) {}
     return _center;
   }
@@ -2401,8 +2411,10 @@ class _SelectionPin extends StatelessWidget {
         ? Icons.location_on_rounded
         : Icons.radio_button_checked_rounded;
     final label = destination ? 'مقصد' : 'مبدا';
+    // The selector is about 108 px tall. Shifting by half its height
+    // places the very bottom anchor dot exactly on the map camera centre.
     return Transform.translate(
-      offset: const Offset(0, -38),
+      offset: const Offset(0, -54),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [

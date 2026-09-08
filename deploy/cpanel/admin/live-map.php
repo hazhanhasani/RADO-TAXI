@@ -91,7 +91,6 @@ ra_header('مرکز عملیات زنده RADO','live','نمایش لحظه‌ا
 <?php if($tv):?>document.body.classList.add('tv-mode');<?php endif;?>
 let map=null;
 let mapReady=false;
-const driverMarkers=new Map();
 let snapshotState={drivers:[],trips:[]};
 let snapshotTimer=null;
 let fallbackTimer=null;
@@ -107,36 +106,25 @@ function setConnection(state,text){const dot=document.getElementById('liveDot');
 function failMap(message){document.getElementById('mapErrorText').textContent=message;document.getElementById('mapError').classList.add('show');setConnection('offline','نقشه نشان در دسترس نیست');feed(message);}
 function statusClass(driverId){const t=snapshotState.trips.find(x=>String(x.driver_id||'')===String(driverId)&&['driver_assigned','driver_arriving','arrived','in_progress'].includes(x.status));if(!t)return 'free';return t.status==='in_progress'?'intrip':'enroute';}
 function driverPopup(d){const cls=statusClass(d.user_id);const state=cls==='free'?'آزاد':cls==='intrip'?'دارای مسافر':'در مسیر مسافر';return '<b>'+esc(d.full_name||'راننده RADO')+'</b><br>وضعیت: '+state+'<br>پلاک: '+esc(d.plate_number||'—')+'<br>خودرو: '+esc(((d.vehicle_make||'')+' '+(d.vehicle_model||'')).trim()||'—')+'<br>سرعت: '+esc(d.speed_kph==null?'—':Math.round(d.speed_kph)+' km/h')+'<br>آخرین GPS: '+esc(d.last_seen_at_jalali||'—');}
-function driverElement(d){
-  const wrap=document.createElement('div');wrap.className='driver-marker';
-  const car=document.createElement('div');car.className='driver-car '+statusClass(d.user_id);car.textContent='🚕';car.dataset.role='car';
-  car.style.transform='rotate('+Number(d.heading||0)+'deg)';wrap.appendChild(car);return wrap;
-}
-function syncDriverVisual(marker,d){
-  const car=marker.getElement()?.querySelector('[data-role="car"]');
-  if(car){car.className='driver-car '+statusClass(d.user_id);car.style.transform='rotate('+Number(d.heading||0)+'deg)';}
-  marker.setPopup(new maplibregl.Popup({offset:22,closeButton:false}).setHTML(driverPopup(d)));
-}
-function smoothMove(marker,lat,lng){
-  const from=marker.getLngLat(),to={lng:Number(lng),lat:Number(lat)},started=performance.now(),duration=650;
-  function step(now){const p=Math.min(1,(now-started)/duration),ease=1-Math.pow(1-p,3);marker.setLngLat([from.lng+(to.lng-from.lng)*ease,from.lat+(to.lat-from.lat)*ease]);if(p<1)requestAnimationFrame(step);}
-  requestAnimationFrame(step);
-}
-function upsertDriver(d,animate=true){
-  if(!mapReady)return;
-  const id=String(d.user_id);let marker=driverMarkers.get(id);
-  if(!marker){marker=new maplibregl.Marker({element:driverElement(d),anchor:'center'}).setLngLat([Number(d.longitude),Number(d.latitude)]).addTo(map);driverMarkers.set(id,marker);}
-  else if(animate)smoothMove(marker,d.latitude,d.longitude);else marker.setLngLat([Number(d.longitude),Number(d.latitude)]);
-  syncDriverVisual(marker,d);
-}
-function removeMissingDrivers(){
-  const ids=new Set(snapshotState.drivers.map(x=>String(x.user_id)));
-  for(const [id,m] of driverMarkers){if(!ids.has(id)){m.remove();driverMarkers.delete(id);}}
-}
 function tripPopup(t){return '<b>'+esc(t.status_fa||t.status)+'</b><br>مسافر: '+esc(t.passenger_name||'مسافر RADO')+' — '+esc(t.passenger_phone||'')+'<br>راننده: '+esc(t.driver_name||'هنوز تخصیص نشده')+'<br>'+esc(t.pickup_label||'مبدا')+' ← '+esc(t.destination_label||'مقصد')+'<br>کرایه: '+money(t.final_fare??t.estimated_fare)+'<br>انتظار: '+waitLabel(t.wait_seconds)+'<br>'+esc(t.requested_at_jalali||'');}
 function passengerPopup(t){return '<b>'+esc(t.passenger_name||'مسافر RADO')+'</b><br>'+esc(t.passenger_phone||'')+'<br>موقعیت زنده مسافر<br>دقت GPS: '+esc(t.passenger_accuracy_m==null?'—':Math.round(t.passenger_accuracy_m)+' متر')+'<br>آخرین بروزرسانی: '+esc(t.passenger_last_seen_at_jalali||'همین حالا');}
 function geoData(){
-  const points=[],lines=[],passengers=[];
+  const points=[],lines=[],passengers=[],drivers=[];
+  for(const d of snapshotState.drivers){
+    const lat=Number(d.latitude),lng=Number(d.longitude);
+    if(!Number.isFinite(lat)||!Number.isFinite(lng))continue;
+    const state=statusClass(d.user_id);
+    drivers.push({
+      type:'Feature',
+      geometry:{type:'Point',coordinates:[lng,lat]},
+      properties:{
+        driver_id:String(d.user_id),
+        state,
+        heading:Number(d.heading||0),
+        popup:driverPopup(d),
+      },
+    });
+  }
   for(const t of snapshotState.trips){
     const waiting=['requested','searching'].includes(t.status);
     const popup=tripPopup(t);
@@ -146,6 +134,7 @@ function geoData(){
     if(t.passenger_lat!=null&&t.passenger_lng!=null)passengers.push({type:'Feature',geometry:{type:'Point',coordinates:[Number(t.passenger_lng),Number(t.passenger_lat)]},properties:{popup:passengerPopup(t)}});
   }
   return {
+    drivers:{type:'FeatureCollection',features:drivers},
     points:{type:'FeatureCollection',features:points},
     lines:{type:'FeatureCollection',features:lines},
     passengers:{type:'FeatureCollection',features:passengers},
@@ -154,11 +143,15 @@ function geoData(){
 function setGeoData(){
   if(!mapReady)return;
   const data=geoData();
-  const a=map.getSource('rado-trip-points'),b=map.getSource('rado-trip-lines'),c=map.getSource('rado-passengers');
-  if(a)a.setData(data.points);if(b)b.setData(data.lines);if(c)c.setData(data.passengers);
+  const d=map.getSource('rado-drivers'),a=map.getSource('rado-trip-points'),b=map.getSource('rado-trip-lines'),c=map.getSource('rado-passengers');
+  if(d)d.setData(data.drivers);if(a)a.setData(data.points);if(b)b.setData(data.lines);if(c)c.setData(data.passengers);
 }
 function addLiveLayers(){
   const empty={type:'FeatureCollection',features:[]};
+  map.addSource('rado-drivers',{type:'geojson',data:empty});
+  map.addLayer({id:'rado-drivers-halo',type:'circle',source:'rado-drivers',paint:{'circle-radius':18,'circle-color':'#ffffff','circle-opacity':.92,'circle-stroke-width':1,'circle-stroke-color':'#171717','circle-stroke-opacity':.15}});
+  map.addLayer({id:'rado-drivers',type:'circle',source:'rado-drivers',paint:{'circle-radius':13,'circle-color':['match',['get','state'],'free','#2fbf71','intrip','#4b86e8','#f5b400'],'circle-stroke-width':3,'circle-stroke-color':'#171717'}});
+  map.addLayer({id:'rado-driver-core',type:'circle',source:'rado-drivers',paint:{'circle-radius':4.5,'circle-color':'#171717','circle-stroke-width':1.5,'circle-stroke-color':'#ffffff'}});
   map.addSource('rado-trip-lines',{type:'geojson',data:empty});
   map.addLayer({id:'rado-trip-lines',type:'line',source:'rado-trip-lines',paint:{'line-color':'#171717','line-width':2.8,'line-opacity':.48,'line-dasharray':[2,2]}});
   map.addSource('rado-trip-points',{type:'geojson',data:empty});
@@ -166,7 +159,7 @@ function addLiveLayers(){
   map.addLayer({id:'rado-destinations',type:'circle',source:'rado-trip-points',filter:['==',['get','kind'],'destination'],paint:{'circle-radius':8,'circle-color':'#8e24aa','circle-stroke-width':3,'circle-stroke-color':'#ffffff'}});
   map.addSource('rado-passengers',{type:'geojson',data:empty});
   map.addLayer({id:'rado-passengers',type:'circle',source:'rado-passengers',paint:{'circle-radius':11,'circle-color':'#ff8a00','circle-stroke-width':3,'circle-stroke-color':'#ffffff'}});
-  for(const layer of ['rado-pickups','rado-destinations','rado-passengers']){
+  for(const layer of ['rado-drivers','rado-pickups','rado-destinations','rado-passengers']){
     map.on('mouseenter',layer,()=>map.getCanvas().style.cursor='pointer');
     map.on('mouseleave',layer,()=>map.getCanvas().style.cursor='');
     map.on('click',layer,e=>{const f=e.features?.[0];if(!f)return;const html=String(f.properties?.popup||'');new maplibregl.Popup({closeButton:false,offset:12}).setLngLat(e.lngLat).setHTML(html).addTo(map);});
@@ -181,8 +174,6 @@ function updateCounters(){
 }
 function renderSnapshot(data){
   snapshotState={drivers:data.drivers||[],trips:data.trips||[]};
-  removeMissingDrivers();
-  for(const d of snapshotState.drivers)upsertDriver(d,true);
   setGeoData();updateCounters();
   document.getElementById('liveTime').textContent=data.time||'';
 }
@@ -201,12 +192,16 @@ function scheduleSnapshot(delay=180){
 function patchDriver(payload){
   const id=String(payload.driver_id||'');if(!id)return;
   const index=snapshotState.drivers.findIndex(x=>String(x.user_id)===id);
-  if(payload.online===false){if(index>=0)snapshotState.drivers.splice(index,1);const m=driverMarkers.get(id);if(m){m.remove();driverMarkers.delete(id);}updateCounters();return;}
+  if(payload.online===false){
+    if(index>=0)snapshotState.drivers.splice(index,1);
+    setGeoData();updateCounters();return;
+  }
   if(index<0){scheduleSnapshot(80);return;}
   const d=snapshotState.drivers[index];
   if(payload.lat!=null)d.latitude=Number(payload.lat);if(payload.lng!=null)d.longitude=Number(payload.lng);
   if(payload.heading!=null)d.heading=Number(payload.heading);if(payload.speed_kph!=null)d.speed_kph=Number(payload.speed_kph);
-  upsertDriver(d,true);
+  d.last_seen_at_jalali='همین حالا';
+  setGeoData();updateCounters();
 }
 function patchPassenger(payload){
   const trip=snapshotState.trips.find(t=>String(t.id)===String(payload.trip_id||''));if(!trip)return;
@@ -264,7 +259,11 @@ function fitAll(){
   const bounds=new maplibregl.LngLatBounds();let count=0;
   for(const d of snapshotState.drivers){bounds.extend([Number(d.longitude),Number(d.latitude)]);count++;}
   for(const t of snapshotState.trips){bounds.extend([Number(t.pickup_lng),Number(t.pickup_lat)]);bounds.extend([Number(t.destination_lng),Number(t.destination_lat)]);count+=2;if(t.passenger_lat!=null&&t.passenger_lng!=null){bounds.extend([Number(t.passenger_lng),Number(t.passenger_lat)]);count++;}}
-  if(count>0)map.fitBounds(bounds,{padding:70,maxZoom:15,duration:600});
+  if(count===1){
+    const d=snapshotState.drivers[0];
+    if(d)map.easeTo({center:[Number(d.longitude),Number(d.latitude)],zoom:15,duration:500});
+    else map.fitBounds(bounds,{padding:70,maxZoom:15,duration:600});
+  }else if(count>1)map.fitBounds(bounds,{padding:70,maxZoom:15,duration:600});
 }
 function loadScript(src,timeoutMs=8000){
   return new Promise((resolve,reject)=>{
