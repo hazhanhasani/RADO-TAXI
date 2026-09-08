@@ -1,0 +1,67 @@
+name: Apply Map Precision Driver Hotfix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/RADO_MAP_PRECISION_HOTFIX'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply hotfix
+        run: python3 scripts/apply_map_precision_driver_layer_hotfix.py
+
+      - name: Verify source guards
+        run: |
+          grep -q "offset: const Offset(0, -54)" apps/passenger/lib/runtime_passenger.dart
+          grep -q "final verified = await _map.getCurrentLocation" apps/passenger/lib/runtime_passenger.dart
+          grep -q "rado-drivers-halo" deploy/cpanel/admin/live-map.php
+          grep -q "map.addSource('rado-drivers'" deploy/cpanel/admin/live-map.php
+          grep -q "setGeoData();updateCounters();" deploy/cpanel/admin/live-map.php
+          ! grep -q "const driverMarkers=new Map" deploy/cpanel/admin/live-map.php
+          git diff --check
+          php -l deploy/cpanel/admin/live-map.php
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Analyze passenger
+        working-directory: apps/passenger
+        run: |
+          mkdir -p assets/branding
+          touch assets/branding/rado-passenger.png
+          flutter pub get
+          flutter analyze --no-fatal-warnings
+
+      - name: Analyze driver
+        working-directory: apps/driver
+        run: |
+          mkdir -p assets/branding
+          touch assets/branding/rado-driver.png
+          flutter pub get
+          flutter analyze --no-fatal-warnings
+
+      - name: Commit hotfix
+        run: |
+          git config user.name "RADO Release Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add apps/passenger/lib/runtime_passenger.dart deploy/cpanel/admin/live-map.php
+          if git diff --cached --quiet; then
+            echo "No source changes to commit"
+            exit 0
+          fi
+          git commit -m "fix(map): exact passenger pin and reliable live driver layer"
+          git push origin main
