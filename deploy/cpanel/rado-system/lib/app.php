@@ -1,9 +1,124 @@
 <?php
 declare(strict_types=1);
 
+date_default_timezone_set('Asia/Tehran');
+
 function rado_root(): string
 {
     return dirname(__DIR__, 2);
+}
+
+function rado_tehran_timezone(): DateTimeZone
+{
+    static $tz = null;
+    if (!$tz instanceof DateTimeZone) {
+        $tz = new DateTimeZone('Asia/Tehran');
+    }
+    return $tz;
+}
+
+function rado_fa_digits(string $value): string
+{
+    return strtr($value, [
+        '0'=>'۰','1'=>'۱','2'=>'۲','3'=>'۳','4'=>'۴',
+        '5'=>'۵','6'=>'۶','7'=>'۷','8'=>'۸','9'=>'۹',
+    ]);
+}
+
+function rado_gregorian_to_jalali(int $gy, int $gm, int $gd): array
+{
+    $gdm = [0,31,59,90,120,151,181,212,243,273,304,334];
+    if ($gy > 1600) {
+        $jy = 979;
+        $gy -= 1600;
+    } else {
+        $jy = 0;
+        $gy -= 621;
+    }
+    $gy2 = $gm > 2 ? $gy + 1 : $gy;
+    $days = 365 * $gy
+        + intdiv($gy2 + 3, 4)
+        - intdiv($gy2 + 99, 100)
+        + intdiv($gy2 + 399, 400)
+        - 80
+        + $gd
+        + $gdm[$gm - 1];
+    $jy += 33 * intdiv($days, 12053);
+    $days %= 12053;
+    $jy += 4 * intdiv($days, 1461);
+    $days %= 1461;
+    if ($days > 365) {
+        $jy += intdiv($days - 1, 365);
+        $days = ($days - 1) % 365;
+    }
+    if ($days < 186) {
+        $jm = 1 + intdiv($days, 31);
+        $jd = 1 + ($days % 31);
+    } else {
+        $jm = 7 + intdiv($days - 186, 30);
+        $jd = 1 + (($days - 186) % 30);
+    }
+    return [$jy, $jm, $jd];
+}
+
+function rado_tehran_datetime(DateTimeInterface|string|null $value = null): DateTimeImmutable
+{
+    if ($value instanceof DateTimeInterface) {
+        return DateTimeImmutable::createFromInterface($value)->setTimezone(rado_tehran_timezone());
+    }
+    $raw = trim((string)($value ?? ''));
+    if ($raw === '') {
+        return new DateTimeImmutable('now', rado_tehran_timezone());
+    }
+    try {
+        if (preg_match('/(?:Z|[+\-]\d{2}:?\d{2})$/', $raw) === 1) {
+            return (new DateTimeImmutable($raw))->setTimezone(rado_tehran_timezone());
+        }
+        return new DateTimeImmutable($raw, rado_tehran_timezone());
+    } catch (Throwable) {
+        return new DateTimeImmutable('now', rado_tehran_timezone());
+    }
+}
+
+function rado_jalali_date(DateTimeInterface|string|null $value = null, bool $persianDigits = true): string
+{
+    $dt = rado_tehran_datetime($value);
+    [$jy, $jm, $jd] = rado_gregorian_to_jalali((int)$dt->format('Y'), (int)$dt->format('n'), (int)$dt->format('j'));
+    $out = sprintf('%04d/%02d/%02d', $jy, $jm, $jd);
+    return $persianDigits ? rado_fa_digits($out) : $out;
+}
+
+function rado_jalali_datetime(DateTimeInterface|string|null $value = null, bool $seconds = false, bool $persianDigits = true): string
+{
+    $dt = rado_tehran_datetime($value);
+    $out = rado_jalali_date($dt, false) . '، ' . $dt->format($seconds ? 'H:i:s' : 'H:i');
+    return $persianDigits ? rado_fa_digits($out) : $out;
+}
+
+function rado_jalali_long(DateTimeInterface|string|null $value = null, bool $persianDigits = true): string
+{
+    $dt = rado_tehran_datetime($value);
+    [$jy, $jm, $jd] = rado_gregorian_to_jalali((int)$dt->format('Y'), (int)$dt->format('n'), (int)$dt->format('j'));
+    $weekdays = [1=>'دوشنبه',2=>'سه‌شنبه',3=>'چهارشنبه',4=>'پنجشنبه',5=>'جمعه',6=>'شنبه',7=>'یکشنبه'];
+    $months = [1=>'فروردین',2=>'اردیبهشت',3=>'خرداد',4=>'تیر',5=>'مرداد',6=>'شهریور',7=>'مهر',8=>'آبان',9=>'آذر',10=>'دی',11=>'بهمن',12=>'اسفند'];
+    $out = $weekdays[(int)$dt->format('N')] . '، ' . $jd . ' ' . $months[$jm] . ' ' . $jy . ' — ساعت ' . $dt->format('H:i');
+    return $persianDigits ? rado_fa_digits($out) : $out;
+}
+
+function rado_now_iso_tehran(): string
+{
+    return (new DateTimeImmutable('now', rado_tehran_timezone()))->format('c');
+}
+
+function rado_time_payload(DateTimeInterface|string|null $value = null): array
+{
+    $dt = rado_tehran_datetime($value);
+    return [
+        'timezone' => 'Asia/Tehran',
+        'jalali' => rado_jalali_datetime($dt),
+        'jalali_long' => rado_jalali_long($dt),
+        'iso_tehran' => $dt->format('c'),
+    ];
 }
 
 function rado_json(int $status, array $payload): never
@@ -52,6 +167,11 @@ function rado_db(): PDO
         PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
         PDO::ATTR_EMULATE_PREPARES => false,
     ]);
+    try {
+        $pdo->exec("SET time_zone = '+03:30'");
+    } catch (Throwable) {
+        // Some shared hosts restrict SET time_zone; PHP formatting still uses Asia/Tehran.
+    }
     return $pdo;
 }
 
