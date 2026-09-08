@@ -16,7 +16,8 @@ try {
         if (!isset($point['lat'],$point['lng']) || !is_numeric($point['lat']) || !is_numeric($point['lng'])) {
             rado_json(422, ['ok'=>false,'error'=>'invalid_'.$name]);
         }
-        $lat = (float)$point['lat']; $lng = (float)$point['lng'];
+        $lat = (float)$point['lat'];
+        $lng = (float)$point['lng'];
         if ($lat < -90 || $lat > 90 || $lng < -180 || $lng > 180) {
             rado_json(422, ['ok'=>false,'error'=>'invalid_'.$name]);
         }
@@ -60,19 +61,20 @@ try {
     $pdo->commit();
 
     $notified = rado_dispatch_trip($pdo, $tripId, (float)$pickup['lat'], (float)$pickup['lng']);
+    $row = rado_trip_row($pdo, $tripId);
+    $payload = $row ? rado_trip_payload($row) : [
+        'id'=>$tripId,
+        'status'=>'searching',
+        'status_fa'=>'در جستجوی راننده',
+        'estimated_fare'=>(int)$breakdown['fare'],
+        'timezone'=>'Asia/Tehran',
+    ];
+    $payload['drivers_notified'] = $notified;
 
     rado_json(201, [
         'ok'=>true,
-        'trip'=>[
-            'id'=>$tripId,
-            'status'=>'searching',
-            'estimated_fare'=>(int)$breakdown['fare'],
-            'currency'=>'IRR',
-            'requested_at'=>rado_jalali_datetime(null, true),
-            'requested_at_long'=>rado_jalali_long(),
-            'timezone'=>'Asia/Tehran',
-            'drivers_notified'=>$notified,
-        ],
+        'trip'=>$payload,
+        'server_time'=>rado_time_payload(),
     ]);
 } catch (Throwable $e) {
     if (isset($pdo) && $pdo instanceof PDO && $pdo->inTransaction()) {
