@@ -23,7 +23,11 @@ jobs:
           test -f deploy/cpanel/sql/migrations/041_operations.sql
           test -f deploy/cpanel/rado-system/lib/platform.php
           test -f deploy/cpanel/rado-system/lib/payments.php
+          test -f deploy/cpanel/rado-system/lib/migrate.php
+          test -f deploy/cpanel/rado-system/lib/tick.php
+          test -f deploy/cpanel/bin/rado-migrate.php
           test -f deploy/cpanel/bin/rado-tick.php
+          test -f deploy/cpanel/bin/rado-update.php
           test -f deploy/cpanel/admin/platform.php
           test -f deploy/cpanel/admin/dispatch.php
           test -f deploy/cpanel/admin/live-map.php
@@ -42,6 +46,17 @@ jobs:
       - name: PHP syntax check
         run: find deploy/cpanel -type f -name '*.php' -print0 | xargs -0 -n1 php -l
 
+      - name: Shared-hosting updater guard
+        run: |
+          if grep -E '\b(exec|shell_exec|system|passthru|proc_open)\s*\(' deploy/cpanel/bin/rado-update.php; then
+            echo "Updater must not depend on disabled shell functions on shared hosting"
+            exit 1
+          fi
+          grep -q "rado_run_database_migrations" deploy/cpanel/bin/rado-update.php
+          grep -q "rado_run_platform_tick" deploy/cpanel/bin/rado-update.php
+          grep -q "function rado_run_database_migrations" deploy/cpanel/rado-system/lib/migrate.php
+          grep -q "function rado_run_platform_tick" deploy/cpanel/rado-system/lib/tick.php
+
       - name: Validate cPanel API include depth
         run: |
           if grep -R "dirname(__DIR__, 5).*rado-system/lib/app.php" deploy/cpanel/api/v1; then
@@ -53,7 +68,7 @@ jobs:
 
       - name: Verify Tehran and Jalali calendar core
         run: |
-          php -r "require 'deploy/cpanel/rado-system/lib/app.php'; if (date_default_timezone_get() !== 'Asia/Tehran') { fwrite(STDERR, 'timezone failed\n'); exit(1); } if (rado_jalali_date('2026-09-08 12:00:00', false) !== '1405/06/17') { fwrite(STDERR, 'jalali conversion failed: '.rado_jalali_date('2026-09-08 12:00:00', false).'\n'); exit(1); } echo rado_jalali_datetime('2026-09-08 12:00:00').PHP_EOL;"
+          php -r "require 'deploy/cpanel/rado-system/lib/app.php'; if (date_default_timezone_get() !== 'Asia/Tehran') exit(1); if (rado_jalali_date('2026-09-08 12:00:00', false) !== '1405/06/17') exit(1);"
 
       - name: Validate migration contracts
         run: |
@@ -62,8 +77,6 @@ jobs:
           grep -q "CREATE TABLE IF NOT EXISTS support_tickets" deploy/cpanel/sql/migrations/040_platform.sql
           grep -q "CREATE TABLE IF NOT EXISTS driver_online_daily" deploy/cpanel/sql/migrations/041_operations.sql
           grep -q "CREATE TABLE IF NOT EXISTS refunds" deploy/cpanel/sql/migrations/041_operations.sql
-          grep -q "sql/migrations" deploy/cpanel/bin/rado-migrate.php
-          grep -q "rado-tick.php" deploy/cpanel/bin/rado-update.php
 
   flutter:
     runs-on: ubuntu-latest
