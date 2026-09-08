@@ -1,0 +1,53 @@
+name: Apply Driver Notification Queue
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.maintenance/APPLY_DRIVER_NOTIFICATION_QUEUE'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: rado-driver-notification-queue-patch
+  cancel-in-progress: false
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Apply driver notification queue patch
+        run: python3 scripts/apply_driver_notification_queue.py
+      - name: Format and validate
+        run: |
+          set -euo pipefail
+          dart format apps/driver/lib/driver_platform.dart apps/driver/lib/advanced_driver.dart
+          grep -q "Future<List<DriverNotification>> notifications" apps/driver/lib/driver_platform.dart
+          grep -q "markNotificationRead" apps/driver/lib/driver_platform.dart
+          grep -q "serverNotifications" apps/driver/lib/advanced_driver.dart
+          git diff --check
+      - name: Analyze Driver
+        working-directory: apps/driver
+        run: |
+          flutter pub get
+          flutter analyze --no-fatal-infos --no-fatal-warnings
+      - name: Commit patched sources
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/driver/lib/driver_platform.dart apps/driver/lib/advanced_driver.dart
+          if git diff --cached --quiet; then
+            echo "Driver notification queue already patched"
+            exit 0
+          fi
+          git commit -m "fix(driver): deliver server trip notifications locally"
+          git push origin HEAD:main
