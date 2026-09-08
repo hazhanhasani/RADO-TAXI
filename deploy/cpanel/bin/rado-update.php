@@ -2,6 +2,7 @@
 declare(strict_types=1);
 if (PHP_SAPI !== 'cli') { http_response_code(403); exit("CLI only\n"); }
 $root = dirname(__DIR__, 2);
+require $root . '/rado-system/lib/app.php';
 $config = require $root . '/rado-system/config.php';
 $stateDir = $root . '/rado-system/state';
 @mkdir($stateDir, 0755, true);
@@ -65,5 +66,12 @@ try{
         @unlink($tmpZip);
     }
     file_put_contents($stateDir.'/release.json.tmp',json_encode($meta,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_PRETTY_PRINT)); rename($stateDir.'/release.json.tmp',$stateDir.'/release.json');
-    file_put_contents($stateDir.'/current_tag',$tag."\n"); file_put_contents($stateDir.'/last_success_at',gmdate('c')."\n"); echo "RADO updated to $tag\n";
-}catch(Throwable $e){file_put_contents($stateDir.'/last_error.log','['.gmdate('c').'] '.$e->getMessage()."\n",FILE_APPEND);fwrite(STDERR,$e->getMessage()."\n");exit(1);}finally{flock($lock,LOCK_UN);fclose($lock);}
+    file_put_contents($stateDir.'/current_tag',$tag."\n");
+    file_put_contents($stateDir.'/last_success_at',rado_jalali_datetime(null,true)."\n");
+    file_put_contents($stateDir.'/last_success_iso',rado_now_iso_tehran()."\n");
+    echo "RADO updated to $tag at ".rado_jalali_datetime(null,true)." Asia/Tehran\n";
+}catch(Throwable $e){
+    file_put_contents($stateDir.'/last_error.log','['.rado_jalali_datetime(null,true).'] '.$e->getMessage()."\n",FILE_APPEND);
+    fwrite(STDERR,$e->getMessage()."\n");
+    exit(1);
+}finally{flock($lock,LOCK_UN);fclose($lock);}
