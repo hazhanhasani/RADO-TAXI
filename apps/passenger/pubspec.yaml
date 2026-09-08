@@ -23,15 +23,16 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^6.0.0
-  flutter_launcher_icons: ^0.14.4
+  flutter_launcher_icons: ^0.14.3
+
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: "assets/branding/rado-passenger.png"
+  adaptive_icon_background: "#171717"
+  adaptive_icon_foreground: "assets/branding/rado-passenger.png"
 
 flutter:
   uses-material-design: true
   assets:
     - assets/branding/rado-passenger.png
-
-flutter_launcher_icons:
-  android: true
-  image_path: assets/branding/rado-passenger.png
-  adaptive_icon_background: '#F7B500'
-  adaptive_icon_foreground: assets/branding/rado-passenger.png
