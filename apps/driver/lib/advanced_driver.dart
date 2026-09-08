@@ -131,6 +131,12 @@ class _AdvancedDriverPageState extends State<AdvancedDriverPage> {
           ? await _api.offers(id)
           : const DriverState();
       final wallet = await _api.wallet(id);
+      List<DriverNotification> serverNotifications = const [];
+      if (session.approved) {
+        try {
+          serverNotifications = await _api.notifications(id);
+        } catch (_) {}
+      }
       DriverPreferences prefs = _prefs;
       List<DriverMission> missions = _missions;
       List<Settlement> settlements = _settlements;
@@ -158,6 +164,24 @@ class _AdvancedDriverPageState extends State<AdvancedDriverPage> {
         _documents = documents;
         _tickets = tickets;
       });
+      final unread = serverNotifications
+          .where((n) => !n.read)
+          .take(3)
+          .toList()
+          .reversed;
+      for (final notice in unread) {
+        try {
+          if (notice.type != 'trip_offer') {
+            await _notifications.show(
+              title: notice.title,
+              body: notice.body,
+              payload: notice.id.toString(),
+            );
+          }
+          await _api.markNotificationRead(id, notice.id);
+        } catch (_) {}
+      }
+
       if (incomingOffer != null && incomingOffer.id != _lastNotifiedOfferId) {
         _lastNotifiedOfferId = incomingOffer.id;
         try {
