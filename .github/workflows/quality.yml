@@ -30,6 +30,17 @@ jobs:
           test -f deploy/cpanel/bin/rado-migrate.php
           test -f deploy/cpanel/bin/rado-tick.php
           test -f deploy/cpanel/bin/rado-update.php
+          test -f deploy/cpanel/admin/_ui.php
+          test -f deploy/cpanel/admin/dashboard.php
+          test -f deploy/cpanel/admin/trips.php
+          test -f deploy/cpanel/admin/drivers.php
+          test -f deploy/cpanel/admin/passengers.php
+          test -f deploy/cpanel/admin/operations.php
+          test -f deploy/cpanel/admin/finance.php
+          test -f deploy/cpanel/admin/growth.php
+          test -f deploy/cpanel/admin/support.php
+          test -f deploy/cpanel/admin/reports.php
+          test -f deploy/cpanel/admin/system.php
           test -f deploy/cpanel/admin/platform.php
           test -f deploy/cpanel/admin/dispatch.php
           test -f deploy/cpanel/admin/live-map.php
@@ -51,6 +62,14 @@ jobs:
 
       - name: PHP syntax check
         run: find deploy/cpanel -type f -name '*.php' -print0 | xargs -0 -n1 php -l
+
+      - name: Validate modular admin navigation
+        run: |
+          grep -q "/admin/dashboard.php" deploy/cpanel/admin/index.php
+          grep -q "/admin/operations.php" deploy/cpanel/admin/_ui.php
+          grep -q "/admin/system.php" deploy/cpanel/admin/_ui.php
+          grep -q "آخرین Release" deploy/cpanel/admin/system.php
+          grep -q "در جستجوی راننده" deploy/cpanel/admin/operations.php
 
       - name: Shared-hosting updater guard
         run: |
