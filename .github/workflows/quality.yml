@@ -61,6 +61,20 @@ jobs:
           grep -q "function rado_run_database_migrations" deploy/cpanel/rado-system/lib/migrate.php
           grep -q "function rado_run_platform_tick" deploy/cpanel/rado-system/lib/tick.php
 
+      - name: Validate cPanel release package layout
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          mkdir -p "$tmp/rado-system/bin"
+          cp -a deploy/cpanel/rado-system/. "$tmp/rado-system/"
+          cp -a deploy/cpanel/bin/. "$tmp/rado-system/bin/"
+          test -f "$tmp/rado-system/bin/rado-update-core.php"
+          test -f "$tmp/rado-system/bin/rado-update.php"
+          test -f "$tmp/rado-system/bin/rado-tick.php"
+          test -f "$tmp/rado-system/bin/rado-migrate.php"
+          test ! -d "$tmp/rado-system/bin/bin"
+          rm -rf "$tmp"
+
       - name: Validate dispatch v2 contract
         run: |
           grep -q "require_once dirname(__DIR__, 4) . '/rado-system/lib/platform.php'" deploy/cpanel/api/v1/driver/offers/index.php
