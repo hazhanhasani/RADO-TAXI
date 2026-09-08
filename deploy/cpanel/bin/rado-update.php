@@ -30,22 +30,12 @@ function shouldPreserve(string $rel, array $config): bool {
     }
     return false;
 }
-function runDatabaseMigration(string $root): void {
-    $dbConfig = $root . '/rado-system/private/database.php';
-    if (!is_file($dbConfig)) {
-        throw new RuntimeException('Database configuration is missing; open setup.php once to complete RADO installation.');
-    }
-    $script = $root . '/rado-system/bin/rado-migrate.php';
-    if (!is_file($script)) {
-        throw new RuntimeException('RADO migration runner is missing from the cPanel package.');
-    }
-    $cmd = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($script) . ' 2>&1';
-    $output = [];
-    $code = 0;
-    exec($cmd, $output, $code);
-    if ($code !== 0) {
-        throw new RuntimeException('Database migration failed: ' . trim(implode(' | ', $output)));
-    }
+function runPhpScript(string $root,string $relative,string $label,bool $required=true): void {
+    $script=$root.'/'.$relative;
+    if(!is_file($script)){if($required)throw new RuntimeException("$label script is missing: $relative");return;}
+    $cmd=escapeshellarg(PHP_BINARY).' '.escapeshellarg($script).' 2>&1';$output=[];$code=0;exec($cmd,$output,$code);
+    if($code!==0&&$required)throw new RuntimeException($label.' failed: '.trim(implode(' | ',$output)));
+    if($code!==0)@file_put_contents($root.'/rado-system/state/tick-errors.log','['.rado_jalali_datetime(null,true).'] '.$label.': '.trim(implode(' | ',$output))."\n",FILE_APPEND|LOCK_EX);
 }
 try{
     $repo=$config['repo'];
@@ -81,11 +71,12 @@ try{
             if($item->isDir()) @mkdir($dest,0755,true); else {@mkdir(dirname($dest),0755,true);copy($item->getPathname(),$dest);}
         }
         @unlink($tmpZip);
-        // Spawn a fresh PHP process so migrations use the newly-copied application code.
-        runDatabaseMigration($root);
+        runPhpScript($root,'rado-system/bin/rado-migrate.php','Database migration',true);
     }
     file_put_contents($stateDir.'/release.json.tmp',json_encode($meta,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_PRETTY_PRINT)); rename($stateDir.'/release.json.tmp',$stateDir.'/release.json');
     file_put_contents($stateDir.'/current_tag',$tag."\n");
+    // Every existing 5-minute updater run is also the operational platform tick.
+    runPhpScript($root,'rado-system/bin/rado-tick.php','Platform tick',false);
     file_put_contents($stateDir.'/last_success_at',rado_jalali_datetime(null,true)."\n");
     file_put_contents($stateDir.'/last_success_iso',rado_now_iso_tehran()."\n");
     echo "RADO updated to $tag at ".rado_jalali_datetime(null,true)." Asia/Tehran\n";
