@@ -58,7 +58,7 @@ jobs:
           path=Path('android/app/src/main/AndroidManifest.xml')
           text=path.read_text()
           marker='<manifest xmlns:android="http://schemas.android.com/apk/res/android">'
-          permissions='''<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n    <uses-permission android:name="android.permission.INTERNET"/>\n    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>'''
+          permissions='''<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n    <uses-permission android:name="android.permission.INTERNET"/>\n    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>\n    <uses-permission android:name="android.permission.CAMERA"/>\n    <uses-permission android:name="android.permission.RECORD_AUDIO"/>'''
           if 'android.permission.INTERNET' not in text: text=text.replace(marker,permissions,1)
           path.write_text(text)
           PY
