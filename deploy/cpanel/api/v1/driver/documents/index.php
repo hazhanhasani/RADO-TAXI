@@ -17,7 +17,8 @@ if($method==='GET'){
 }
 if($method!=='POST')rado_json(405,['ok'=>false,'error'=>'method_not_allowed']);
 $type=(string)($_POST['document_type']??'other');
-if(!in_array($type,['national_card','driver_license','vehicle_card','insurance','inspection','other'],true))rado_json(422,['ok'=>false,'error'=>'invalid_document_type']);
+$allowedTypes=['national_card','national_card_front','national_card_back','driver_license','driver_license_front','driver_license_back','vehicle_card','vehicle_card_front','vehicle_card_back','insurance','inspection','profile_photo','vehicle_front','vehicle_back','vehicle_side','ownership_proof','other'];
+if(!in_array($type,$allowedTypes,true))rado_json(422,['ok'=>false,'error'=>'invalid_document_type']);
 $number=mb_substr(trim((string)($_POST['document_number']??'')),0,120,'UTF-8');
 $expires=trim((string)($_POST['expires_at']??''));
 if($expires!==''&&!preg_match('/^\d{4}-\d{2}-\d{2}$/',$expires))rado_json(422,['ok'=>false,'error'=>'invalid_expiry']);
