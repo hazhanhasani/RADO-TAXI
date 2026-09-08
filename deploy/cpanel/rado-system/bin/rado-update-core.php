@@ -21,9 +21,6 @@ function radoUpdaterNowIsoTehran(): string {
         return date('c');
     }
 }
-if (!function_exists('rado_now_iso_tehran')) {
-    function rado_now_iso_tehran(): string { return radoUpdaterNowIsoTehran(); }
-}
 
 function radoUpdaterCurlGet(string $url, array $headers, int $connectTimeout, int $timeout): array {
     $ch=curl_init($url);
