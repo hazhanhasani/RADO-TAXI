@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:neshan_maps_flutter/map.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -72,6 +73,10 @@ class _RuntimePassengerPageState extends State<RuntimePassengerPage> {
   bool _polling = false;
   DateTime? _lastDriverRouteAt;
   RadoRealtimeStream? _tripStream;
+  StreamSubscription<Position>? _passengerPositionSub;
+  Timer? _passengerPresenceHeartbeat;
+  Position? _lastPassengerPosition;
+  DateTime? _lastPassengerPresenceAt;
 
   @override
   void initState() {
@@ -83,6 +88,8 @@ class _RuntimePassengerPageState extends State<RuntimePassengerPage> {
   void dispose() {
     _poller?.cancel();
     _tripStream?.close();
+    _passengerPresenceHeartbeat?.cancel();
+    _passengerPositionSub?.cancel();
     _map.dispose();
     super.dispose();
   }
@@ -354,6 +361,7 @@ class _RuntimePassengerPageState extends State<RuntimePassengerPage> {
       });
       _poller?.cancel();
       _startTripRealtime(trip.id);
+      await _startPassengerPresence(trip.id);
       _poller = Timer.periodic(const Duration(seconds: 20), (_) => _poll());
       await _syncMapOverlays();
       await _poll();
@@ -363,6 +371,90 @@ class _RuntimePassengerPageState extends State<RuntimePassengerPage> {
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  Future<void> _startPassengerPresence(String tripId) async {
+    await _stopPassengerPresence();
+    final id = _clientId;
+    if (id == null) return;
+    try {
+      if (!await Geolocator.isLocationServiceEnabled()) return;
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        return;
+      }
+      final first = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+        ),
+      );
+      _lastPassengerPosition = first;
+      await _publishPassengerPresence(tripId, first, force: true);
+      _passengerPositionSub =
+          Geolocator.getPositionStream(
+            locationSettings: const LocationSettings(
+              accuracy: LocationAccuracy.high,
+              distanceFilter: 4,
+            ),
+          ).listen((position) {
+            _lastPassengerPosition = position;
+            unawaited(_publishPassengerPresence(tripId, position));
+          });
+      _passengerPresenceHeartbeat = Timer.periodic(
+        const Duration(seconds: 20),
+        (_) {
+          final position = _lastPassengerPosition;
+          if (position != null) {
+            unawaited(_publishPassengerPresence(tripId, position, force: true));
+          }
+        },
+      );
+    } catch (_) {
+      // Live passenger presence is additive; booking must keep working without it.
+    }
+  }
+
+  Future<void> _publishPassengerPresence(
+    String tripId,
+    Position position, {
+    bool force = false,
+  }) async {
+    final id = _clientId;
+    final trip = _trip;
+    if (id == null || trip == null || trip.id != tripId || trip.terminal)
+      return;
+    if (trip.status == 'in_progress') return;
+    final now = DateTime.now();
+    if (!force &&
+        _lastPassengerPresenceAt != null &&
+        now.difference(_lastPassengerPresenceAt!).inMilliseconds < 1800) {
+      return;
+    }
+    _lastPassengerPresenceAt = now;
+    try {
+      await _realtime.publishPassengerLocation(
+        clientId: id,
+        tripId: tripId,
+        lat: position.latitude,
+        lng: position.longitude,
+        accuracyMeters: position.accuracy,
+        heading: position.heading >= 0 ? position.heading : null,
+        speedKph: position.speed >= 0 ? position.speed * 3.6 : null,
+      );
+    } catch (_) {}
+  }
+
+  Future<void> _stopPassengerPresence() async {
+    _passengerPresenceHeartbeat?.cancel();
+    _passengerPresenceHeartbeat = null;
+    await _passengerPositionSub?.cancel();
+    _passengerPositionSub = null;
+    _lastPassengerPosition = null;
+    _lastPassengerPresenceAt = null;
   }
 
   void _startTripRealtime(String tripId) {
@@ -378,6 +470,7 @@ class _RuntimePassengerPageState extends State<RuntimePassengerPage> {
           if (!mounted || _trip?.id != tripId) return;
           if (event.name != 'rado_event') return;
           final type = (event.data['event_type'] ?? '').toString();
+          if (type == 'passenger_location') return;
           final rawPayload = event.data['payload'];
           final payload = rawPayload is Map
               ? rawPayload.cast<String, dynamic>()
@@ -445,6 +538,9 @@ class _RuntimePassengerPageState extends State<RuntimePassengerPage> {
       if (oldStatus != fresh.status) await _notifyTripTransition(fresh);
       await _updateDriverRoute(fresh);
       await _syncMapOverlays();
+      if (fresh.terminal || fresh.status == 'in_progress') {
+        await _stopPassengerPresence();
+      }
       if (fresh.terminal) {
         _poller?.cancel();
         _tripStream?.close();
@@ -653,6 +749,7 @@ class _RuntimePassengerPageState extends State<RuntimePassengerPage> {
       _poller?.cancel();
       _tripStream?.close();
       _tripStream = null;
+      await _stopPassengerPresence();
     } catch (e) {
       _show(_ride.message(e));
     }
@@ -1095,6 +1192,7 @@ class _RuntimePassengerPageState extends State<RuntimePassengerPage> {
 
   void _reset() {
     _poller?.cancel();
+    unawaited(_stopPassengerPresence());
     _tripStream?.close();
     _tripStream = null;
     setState(() {

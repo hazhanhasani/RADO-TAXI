@@ -139,7 +139,7 @@ class _AdvancedDriverPageState extends State<AdvancedDriverPage> {
           if (!mounted || _streamTripId != tripId) return;
           if (event.name != 'rado_event') return;
           final type = (event.data['event_type'] ?? '').toString();
-          if (type == 'driver_location') return;
+          if (type == 'driver_location' || type == 'passenger_location') return;
           await _refresh(all: type == 'completed');
         },
       ),
