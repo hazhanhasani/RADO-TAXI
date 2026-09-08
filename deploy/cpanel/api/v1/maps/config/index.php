@@ -14,6 +14,12 @@ if (!is_file($file)) {
 $secrets = require $file;
 if (!is_array($secrets)) $secrets = [];
 $webKey = trim((string)($secrets['neshan_web_map_key'] ?? ''));
+$legacyKey = trim((string)($secrets['neshan_map_key'] ?? ''));
+$usingLegacy = false;
+if ($webKey === '' && $legacyKey !== '') {
+    $webKey = $legacyKey;
+    $usingLegacy = true;
+}
 if ($webKey === '') {
     rado_json(503, [
         'ok'=>false,
@@ -29,5 +35,6 @@ rado_json(200, [
     'provider'=>'neshan',
     'engine'=>'web_sdk',
     'map_key'=>$webKey,
+    'legacy_key'=>$usingLegacy,
     'timezone'=>'Asia/Tehran',
 ]);

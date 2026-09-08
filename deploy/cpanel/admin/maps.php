@@ -63,7 +63,7 @@ ra_header('نقشه و Neshan','maps','تنظیم کلیدها و سلامت س�
 <?php if($message!==''):?><div class="notice ok"><?=ra_e($message)?></div><?php endif;?>
 <?php if($error!==''):?><div class="notice err"><?=ra_e($error)?></div><?php endif;?>
 <div class="grid">
-  <div class="card span4 metric"><small>Web Map Key</small><b><?=$webConfigured?'فعال':'تنظیم نشده'?></b><span class="muted">نمایش نقشه داخل Passenger</span></div>
+  <div class="card span4 metric"><small>Web Map Key</small><b><?=$webConfigured?'فعال':'تنظیم نشده'?></b><span class="muted">نمایش نقشه در اپ‌ها و مرکز عملیات زنده</span></div>
   <div class="card span4 metric"><small>Service API Key</small><b><?=$serviceConfigured?'فعال':'تنظیم نشده'?></b><span class="muted">Search / Reverse / Direction</span></div>
   <div class="card span4 metric"><small>وضعیت کلی</small><b><?=$webConfigured&&$serviceConfigured?'آماده':'نیاز به تنظیم'?></b><span class="muted">کلیدهای سرویس جدا نگهداری می‌شوند</span></div>
 </div>

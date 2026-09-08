@@ -57,7 +57,7 @@ $online=(int)ra_scalar($pdo,"SELECT COUNT(*) FROM drivers d JOIN driver_presence
 $active=(int)ra_scalar($pdo,"SELECT COUNT(*) FROM trips WHERE status IN('driver_assigned','driver_arriving','arrived','in_progress')");
 $waiting=(int)ra_scalar($pdo,"SELECT COUNT(*) FROM trips WHERE status IN('requested','searching')");
 $tv=isset($_GET['tv']);
-ra_header('مرکز عملیات زنده RADO','operations','نمایش لحظه‌ای رانندگان، درخواست‌ها و سفرهای فعال بانه');
+ra_header('مرکز عملیات زنده RADO','live','نمایش لحظه‌ای رانندگان، درخواست‌ها و سفرهای فعال بانه');
 ?>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@neshan-maps-platform/maplibre-sdk@5.24.4/dist/neshan-maplibre-sdk.css">
 <style>
@@ -87,7 +87,6 @@ ra_header('مرکز عملیات زنده RADO','operations','نمایش لحظ�
     <div class="legend-row"><span class="legend-swatch" style="background:#8e24aa"></span>مقصد</div>
   </div>
 </div>
-<script src="https://cdn.jsdelivr.net/npm/@neshan-maps-platform/maplibre-sdk@5.24.4/dist/neshan-maplibre-sdk.umd.js"></script>
 <script>
 <?php if($tv):?>document.body.classList.add('tv-mode');<?php endif;?>
 let map=null;
@@ -97,13 +96,15 @@ let snapshotState={drivers:[],trips:[]};
 let snapshotTimer=null;
 let fallbackTimer=null;
 let streamHealthy=false;
+let streamStarted=false;
+let mapLoadTimer=null;
 
 function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));}
 function money(v){return new Intl.NumberFormat('fa-IR').format(Number(v||0))+' ریال';}
 function waitLabel(sec){sec=Math.max(0,Number(sec||0));if(sec<60)return Math.floor(sec)+' ثانیه';return Math.floor(sec/60)+' دقیقه';}
 function feed(text){const box=document.getElementById('liveFeed');const line=document.createElement('div');line.textContent='• '+text;box.prepend(line);while(box.children.length>5)box.lastElementChild.remove();}
 function setConnection(state,text){const dot=document.getElementById('liveDot');dot.className='live-dot '+(state==='live'?'':state);document.getElementById('liveStatus').textContent=text;}
-function failMap(message){document.getElementById('mapErrorText').textContent=message;document.getElementById('mapError').classList.add('show');setConnection('offline','نقشه نشان در دسترس نیست');}
+function failMap(message){document.getElementById('mapErrorText').textContent=message;document.getElementById('mapError').classList.add('show');setConnection('offline','نقشه نشان در دسترس نیست');feed(message);}
 function statusClass(driverId){const t=snapshotState.trips.find(x=>String(x.driver_id||'')===String(driverId)&&['driver_assigned','driver_arriving','arrived','in_progress'].includes(x.status));if(!t)return 'free';return t.status==='in_progress'?'intrip':'enroute';}
 function driverPopup(d){const cls=statusClass(d.user_id);const state=cls==='free'?'آزاد':cls==='intrip'?'دارای مسافر':'در مسیر مسافر';return '<b>'+esc(d.full_name||'راننده RADO')+'</b><br>وضعیت: '+state+'<br>پلاک: '+esc(d.plate_number||'—')+'<br>خودرو: '+esc(((d.vehicle_make||'')+' '+(d.vehicle_model||'')).trim()||'—')+'<br>سرعت: '+esc(d.speed_kph==null?'—':Math.round(d.speed_kph)+' km/h')+'<br>آخرین GPS: '+esc(d.last_seen_at_jalali||'—');}
 function driverElement(d){
@@ -212,6 +213,7 @@ function patchPassenger(payload){
   trip.passenger_lat=Number(payload.lat);trip.passenger_lng=Number(payload.lng);trip.passenger_accuracy_m=payload.accuracy_m==null?null:Number(payload.accuracy_m);trip.passenger_last_seen_at_jalali='همین حالا';setGeoData();
 }
 function connectStream(){
+  if(streamStarted)return;streamStarted=true;
   if(!window.EventSource){setConnection('offline','مرورگر EventSource را پشتیبانی نمی‌کند');return;}
   const es=new EventSource('/admin/live-stream.php');
   es.addEventListener('ready',()=>{streamHealthy=true;setConnection('live','اتصال زنده برقرار است');feed('Stream زنده متصل شد');});
@@ -246,12 +248,13 @@ async function initMap(){
       attributionControl:true,
     });
     map.addControl(new maplibregl.NavigationControl({showCompass:true,showZoom:true}),'top-left');
+    mapLoadTimer=setTimeout(()=>{if(!mapReady)failMap('بارگذاری نقشه نشان بیش از حد طول کشید. Web Map Key، دسترسی دامنه و اینترنت تلویزیون را بررسی کنید.');},12000);
     map.on('load',async()=>{
-      mapReady=true;addLiveLayers();await loadSnapshot();connectStream();
-      clearInterval(fallbackTimer);fallbackTimer=setInterval(loadSnapshot,30000);
+      clearTimeout(mapLoadTimer);mapReady=true;document.getElementById('mapError').classList.remove('show');addLiveLayers();await loadSnapshot();
+      setConnection(streamHealthy?'live':'connecting',streamHealthy?'اتصال زنده برقرار است':'نقشه نشان آماده است؛ در حال اتصال زنده…');
       setTimeout(()=>{if(snapshotState.drivers.length||snapshotState.trips.length)fitAll();},500);
     });
-    map.on('error',e=>{if(!mapReady&&e?.error?.message)failMap('خطای نقشه نشان: '+e.error.message);});
+    map.on('error',e=>{if(!mapReady){const msg=e?.error?.message||e?.message||'خطای ناشناخته MapLibre';failMap('خطای نقشه نشان: '+msg);}});
   }catch(e){failMap(String(e?.message||e));}
 }
 function fitAll(){
@@ -261,6 +264,38 @@ function fitAll(){
   for(const t of snapshotState.trips){bounds.extend([Number(t.pickup_lng),Number(t.pickup_lat)]);bounds.extend([Number(t.destination_lng),Number(t.destination_lat)]);count+=2;if(t.passenger_lat!=null&&t.passenger_lng!=null){bounds.extend([Number(t.passenger_lng),Number(t.passenger_lat)]);count++;}}
   if(count>0)map.fitBounds(bounds,{padding:70,maxZoom:15,duration:600});
 }
-initMap();
+function loadScript(src,timeoutMs=8000){
+  return new Promise((resolve,reject)=>{
+    const s=document.createElement('script');let done=false;
+    const timer=setTimeout(()=>{if(done)return;done=true;s.remove();reject(new Error('timeout '+src));},timeoutMs);
+    s.src=src;s.async=true;
+    s.onload=()=>{if(done)return;done=true;clearTimeout(timer);resolve();};
+    s.onerror=()=>{if(done)return;done=true;clearTimeout(timer);s.remove();reject(new Error('load failed '+src));};
+    document.head.appendChild(s);
+  });
+}
+async function loadNeshanSdk(){
+  if(window.maplibregl?.Map)return;
+  const urls=[
+    'https://cdn.jsdelivr.net/npm/@neshan-maps-platform/maplibre-sdk@5.24.4/dist/neshan-maplibre-sdk.umd.js',
+    'https://unpkg.com/@neshan-maps-platform/maplibre-sdk@5.24.4/dist/neshan-maplibre-sdk.umd.js'
+  ];
+  const errors=[];
+  for(const url of urls){
+    try{setConnection('connecting','در حال دریافت موتور نقشه نشان…');await loadScript(url);if(window.maplibregl?.Map){feed('SDK نقشه نشان بارگذاری شد');return;}}catch(e){errors.push(String(e?.message||e));}
+  }
+  throw new Error('SDK نقشه نشان بارگذاری نشد. '+errors.join(' | '));
+}
+async function bootLiveMap(){
+  await loadSnapshot();
+  connectStream();
+  clearInterval(fallbackTimer);fallbackTimer=setInterval(loadSnapshot,30000);
+  try{
+    await loadNeshanSdk();
+    setConnection('connecting','در حال دریافت نقشه از نشان…');
+    await initMap();
+  }catch(e){failMap(String(e?.message||e));}
+}
+bootLiveMap();
 </script>
 <?php ra_footer(); ?>

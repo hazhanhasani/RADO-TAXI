@@ -37,6 +37,7 @@ function ra_nav(): array { return [
     'drivers'=>['رانندگان','/admin/drivers.php','🚕'],
     'passengers'=>['مسافران','/admin/passengers.php','👤'],
     'operations'=>['عملیات','/admin/operations.php','◎'],
+    'live'=>['زنده','/admin/live-map.php','●'],
     'finance'=>['مالی','/admin/finance.php','﷼'],
     'growth'=>['رشد','/admin/growth.php','★'],
     'support'=>['پشتیبانی','/admin/support.php','?'],
