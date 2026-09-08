@@ -109,8 +109,10 @@ if (!is_file($keystorePath)) fail(503, 'signing keystore missing');
 foreach (['store_password','key_alias','key_password'] as $required) {
     if (!isset($secrets[$required]) || trim((string)$secrets[$required]) === '') fail(503, 'CI secrets incomplete');
 }
-$webMapKey = trim((string)($secrets['neshan_web_map_key'] ?? $secrets['neshan_map_key'] ?? ''));
-if ($webMapKey === '') fail(503, 'Neshan Web Map Key missing');
+
+// Never guess the key type. neshan_maps_flutter requires an explicit Web Key.
+$webMapKey = trim((string)($secrets['neshan_web_map_key'] ?? ''));
+if ($webMapKey === '') fail(503, 'Neshan Web Map Key missing; configure /admin/maps.php');
 
 echo json_encode([
     'ok' => true,
@@ -119,6 +121,6 @@ echo json_encode([
     'key_alias' => (string)$secrets['key_alias'],
     'key_password' => (string)$secrets['key_password'],
     'neshan_web_map_key' => $webMapKey,
-    // Legacy field for older CI clients until all workflows are migrated.
+    // Temporary compatibility alias for existing workflows; it is guaranteed to be a Web Key.
     'neshan_map_key' => $webMapKey,
 ], JSON_UNESCAPED_SLASHES);
