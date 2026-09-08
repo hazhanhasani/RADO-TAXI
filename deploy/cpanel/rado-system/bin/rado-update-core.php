@@ -104,7 +104,15 @@ try{
     $tag=(string)($release['tag_name']??'');if($tag==='')throw new RuntimeException('Latest GitHub release has no tag');file_put_contents($stateDir.'/target_tag',$tag."\n",LOCK_EX);
     $current=is_file($stateDir.'/current_tag')?trim((string)file_get_contents($stateDir.'/current_tag')):'';$assets=is_array($release['assets']??null)?$release['assets']:[];$metaAsset=radoUpdaterAsset($assets,'RADO-release.json');if(!$metaAsset)throw new RuntimeException('RADO-release.json missing from GitHub release');
     $tmpMeta=tempnam(sys_get_temp_dir(),'rado-meta-');radoUpdaterDownload((string)$metaAsset['browser_download_url'],$tmpMeta,$config,90);$meta=json_decode((string)file_get_contents($tmpMeta),true,512,JSON_THROW_ON_ERROR);@unlink($tmpMeta);
-    if($current!==$tag)radoUpdaterInstallCore($root,$stateDir,$config,$assets,$meta,$tag);else{$tmpState=$stateDir.'/release.json.tmp';file_put_contents($tmpState,json_encode($meta,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_PRETTY_PRINT),LOCK_EX);rename($tmpState,$stateDir.'/release.json');}
+    if($current!==$tag){
+        radoUpdaterInstallCore($root,$stateDir,$config,$assets,$meta,$tag);
+    }else{
+        $tmpState=$stateDir.'/release.json.tmp';file_put_contents($tmpState,json_encode($meta,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_PRETTY_PRINT),LOCK_EX);rename($tmpState,$stateDir.'/release.json');
+        // Self-heal: migrations are idempotent and must run even when code/tag already matches.
+        // This repairs interrupted updates and hotfix deployments where files landed before DB changes.
+        require_once $root.'/rado-system/lib/migrate.php';
+        rado_run_database_migrations($root);
+    }
     radoUpdaterMirrorApps($root,$stateDir,$config,$assets,$meta);
     try{require_once $root.'/rado-system/lib/tick.php';rado_run_platform_tick();@unlink($stateDir.'/tick-errors.log');}catch(Throwable $tickError){@file_put_contents($stateDir.'/tick-errors.log','['.rado_jalali_datetime(null,true).'] '.$tickError->getMessage()."\n",FILE_APPEND|LOCK_EX);}
     file_put_contents($stateDir.'/last_success_at',rado_jalali_datetime(null,true)."\n",LOCK_EX);file_put_contents($stateDir.'/last_success_iso',radoUpdaterNowIsoTehran()."\n",LOCK_EX);file_put_contents($stateDir.'/update_status',"ok\n",LOCK_EX);radoUpdaterClearErrors($stateDir);
