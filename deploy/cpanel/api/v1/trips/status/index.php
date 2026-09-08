@@ -1,70 +1,16 @@
 <?php
 declare(strict_types=1);
 require dirname(__DIR__, 4) . '/rado-system/lib/app.php';
+require_once dirname(__DIR__, 4) . '/rado-system/lib/platform.php';
 
 try {
-    $pdo = rado_db();
-
-    if ($_SERVER['REQUEST_METHOD'] === 'GET') {
-        $clientId = trim((string)($_GET['client_id'] ?? ''));
-        $tripId = trim((string)($_GET['trip_id'] ?? ''));
-        $passengerId = rado_passenger_from_client($pdo, $clientId);
-        if ($passengerId === null || $tripId === '') {
-            rado_json(404, ['ok'=>false,'error'=>'trip_not_found']);
-        }
-
-        $stmt = $pdo->prepare('SELECT status,requested_at FROM trips WHERE id=? AND passenger_id=? LIMIT 1');
-        $stmt->execute([$tripId,$passengerId]);
-        $ownership = $stmt->fetch();
-        if (!is_array($ownership)) rado_json(404, ['ok'=>false,'error'=>'trip_not_found']);
-
-        if ((string)$ownership['status'] === 'searching' && strtotime((string)$ownership['requested_at']) < time() - 600) {
-            $expire = $pdo->prepare("UPDATE trips SET status='expired',version=version+1 WHERE id=? AND passenger_id=? AND status='searching'");
-            $expire->execute([$tripId,$passengerId]);
-        }
-
-        $row = rado_trip_row($pdo, $tripId);
-        rado_json(200, [
-            'ok'=>true,
-            'trip'=>$row ? rado_trip_payload($row) : null,
-            'server_time'=>rado_time_payload(),
-        ]);
+    $pdo=rado_db();
+    if($_SERVER['REQUEST_METHOD']==='GET'){
+        $clientId=trim((string)($_GET['client_id']??''));$tripId=trim((string)($_GET['trip_id']??''));$passengerId=rado_passenger_from_client($pdo,$clientId);if($passengerId===null||$tripId==='')rado_json(404,['ok'=>false,'error'=>'trip_not_found']);$stmt=$pdo->prepare('SELECT status,requested_at FROM trips WHERE id=? AND passenger_id=? LIMIT 1');$stmt->execute([$tripId,$passengerId]);$ownership=$stmt->fetch();if(!is_array($ownership))rado_json(404,['ok'=>false,'error'=>'trip_not_found']);if((string)$ownership['status']==='searching'&&strtotime((string)$ownership['requested_at'])<time()-1200){$expire=$pdo->prepare("UPDATE trips SET status='expired',version=version+1 WHERE id=? AND passenger_id=? AND status='searching'");$expire->execute([$tripId,$passengerId]);if($expire->rowCount()>0)rado_platform_event($pdo,'trip:'.$tripId,'expired',[]);}$row=rado_trip_row($pdo,$tripId);rado_json(200,['ok'=>true,'trip'=>$row?rado_trip_payload($row):null,'server_time'=>rado_time_payload()]);
     }
-
-    if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-        rado_json(405, ['ok'=>false,'error'=>'method_not_allowed']);
-    }
-
-    $body = rado_body();
-    $clientId = trim((string)($body['client_id'] ?? ''));
-    $tripId = trim((string)($body['trip_id'] ?? ''));
-    $action = trim((string)($body['action'] ?? ''));
-    if ($action !== 'cancel' || $tripId === '') {
-        rado_json(422, ['ok'=>false,'error'=>'invalid_trip_action']);
-    }
-    $passengerId = rado_passenger_from_client($pdo, $clientId);
-    if ($passengerId === null) rado_json(404, ['ok'=>false,'error'=>'trip_not_found']);
-
-    $pdo->beginTransaction();
-    $stmt = $pdo->prepare('SELECT * FROM trips WHERE id=? AND passenger_id=? FOR UPDATE');
-    $stmt->execute([$tripId,$passengerId]);
-    $trip = $stmt->fetch();
-    if (!is_array($trip)) {
-        $pdo->rollBack();
-        rado_json(404, ['ok'=>false,'error'=>'trip_not_found']);
-    }
-    $status = (string)$trip['status'];
-    if (!in_array($status, ['requested','searching','driver_assigned','driver_arriving','arrived'], true)) {
-        $pdo->rollBack();
-        rado_json(409, ['ok'=>false,'error'=>'cannot_cancel_trip','message'=>'بعد از شروع سفر امکان لغو از اپ مسافر وجود ندارد.']);
-    }
-    $stmt = $pdo->prepare("UPDATE trips SET status='cancelled_by_passenger',cancelled_at=NOW(),cancellation_reason='لغو توسط مسافر',version=version+1 WHERE id=?");
-    $stmt->execute([$tripId]);
-    $pdo->commit();
-
-    $row = rado_trip_row($pdo, $tripId);
-    rado_json(200, ['ok'=>true,'trip'=>$row ? rado_trip_payload($row) : null,'server_time'=>rado_time_payload()]);
-} catch (Throwable $e) {
-    if (isset($pdo) && $pdo instanceof PDO && $pdo->inTransaction()) $pdo->rollBack();
-    rado_json(500, ['ok'=>false,'error'=>'passenger_trip_status_failed']);
-}
+    if($_SERVER['REQUEST_METHOD']!=='POST')rado_json(405,['ok'=>false,'error'=>'method_not_allowed']);
+    $body=rado_body();$clientId=trim((string)($body['client_id']??''));$tripId=trim((string)($body['trip_id']??''));$action=trim((string)($body['action']??''));$reason=mb_substr(trim((string)($body['reason']??'لغو توسط مسافر')),0,500,'UTF-8');if($action!=='cancel'||$tripId==='')rado_json(422,['ok'=>false,'error'=>'invalid_trip_action']);$passengerId=rado_passenger_from_client($pdo,$clientId);if($passengerId===null)rado_json(404,['ok'=>false,'error'=>'trip_not_found']);
+    $pdo->beginTransaction();$stmt=$pdo->prepare('SELECT * FROM trips WHERE id=? AND passenger_id=? FOR UPDATE');$stmt->execute([$tripId,$passengerId]);$trip=$stmt->fetch();if(!is_array($trip)){$pdo->rollBack();rado_json(404,['ok'=>false,'error'=>'trip_not_found']);}$status=(string)$trip['status'];if(!in_array($status,['requested','searching','driver_assigned','driver_arriving','arrived'],true)){$pdo->rollBack();rado_json(409,['ok'=>false,'error'=>'cannot_cancel_trip','message'=>'بعد از شروع سفر امکان لغو از اپ مسافر وجود ندارد.']);}
+    $accepted=in_array($status,['driver_assigned','driver_arriving','arrived'],true);$penalty=max(0,(int)(rado_setting($pdo,$accepted?'cancel_penalty_after_accept':'cancel_penalty_before_accept','0')??'0'));$wallet=rado_wallet_balance($pdo,$passengerId);$charged=0;if($penalty>0&&$wallet>0){$charged=min($penalty,$wallet);$key='trip:'.$tripId.':cancel_penalty';$ins=$pdo->prepare("INSERT IGNORE INTO ledger_entries(user_id,trip_id,entry_type,amount,balance_after,idempotency_key,metadata_json) VALUES(?,?,'cancel_penalty',?,?,?,?,?)");$ins->execute([$passengerId,$tripId,-$charged,$wallet-$charged,$key,json_encode(['requested_penalty'=>$penalty,'status'=>$status],JSON_UNESCAPED_UNICODE)]);if($ins->rowCount()>0)rado_sync_wallet_cache($pdo,$passengerId);else$charged=0;}
+    $pdo->prepare("UPDATE trips SET status='cancelled_by_passenger',cancelled_at=NOW(),cancellation_reason=?,version=version+1 WHERE id=?")->execute([$reason,$tripId]);$pdo->prepare("INSERT INTO trip_cancellation_events(trip_id,actor_user_id,actor_role,reason_code,reason_text,penalty_amount) VALUES(?,?,'passenger','passenger_cancel',?,?)")->execute([$tripId,$passengerId,$reason,$charged]);$pdo->commit();rado_platform_event($pdo,'trip:'.$tripId,'cancelled',['by'=>'passenger','penalty'=>$charged]);if(!empty($trip['driver_id']))rado_platform_notify($pdo,(string)$trip['driver_id'],'سفر لغو شد','مسافر سفر را لغو کرد.','trip_cancelled',['trip_id'=>$tripId]);$row=rado_trip_row($pdo,$tripId);rado_json(200,['ok'=>true,'trip'=>$row?rado_trip_payload($row):null,'cancellation_penalty'=>$charged,'server_time'=>rado_time_payload()]);
+}catch(Throwable $e){if(isset($pdo)&&$pdo instanceof PDO&&$pdo->inTransaction())$pdo->rollBack();$id=substr(bin2hex(random_bytes(8)),0,12);rado_json(500,['ok'=>false,'error'=>'passenger_trip_status_failed','request_id'=>$id]);}
