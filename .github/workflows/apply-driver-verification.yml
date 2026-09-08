@@ -75,10 +75,9 @@ jobs:
           git config user.email "actions@users.noreply.github.com"
           git add deploy/cpanel/admin/_ui.php deploy/cpanel/admin/settings.php deploy/cpanel/admin/drivers.php \
             deploy/cpanel/rado-system/lib/app.php deploy/cpanel/rado-system/lib/api_ir.php deploy/cpanel/rado-system/lib/tick.php \
-            apps/driver/lib/advanced_driver.dart apps/driver/lib/driver_platform.dart \
-            .github/workflows/release.yml .github/workflows/android-driver.yml .github/workflows/quality.yml
+            apps/driver/lib/advanced_driver.dart apps/driver/lib/driver_platform.dart
           if git diff --cached --quiet; then
-            echo "No integration changes to commit"
+            echo "No integration source changes to commit"
             exit 0
           fi
           git commit -m "feat(verification): integrate API.ir KYC across driver and admin"
