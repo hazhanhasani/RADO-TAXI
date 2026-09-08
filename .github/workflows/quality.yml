@@ -20,12 +20,15 @@ jobs:
           test -f apps/driver/pubspec.yaml
           test -f apps/driver/lib/advanced_driver.dart
           test -f apps/driver/lib/driver_platform.dart
+          test -f apps/driver/lib/driver_verification.dart
           test -f deploy/cpanel/sql/migrations/040_platform.sql
           test -f deploy/cpanel/sql/migrations/041_operations.sql
+          test -f deploy/cpanel/sql/migrations/043_driver_verification.sql
           test -f deploy/cpanel/rado-system/lib/platform.php
           test -f deploy/cpanel/rado-system/lib/payments.php
           test -f deploy/cpanel/rado-system/lib/migrate.php
           test -f deploy/cpanel/rado-system/lib/tick.php
+          test -f deploy/cpanel/rado-system/lib/api_ir.php
           test -f deploy/cpanel/rado-system/bin/rado-update-core.php
           test -f deploy/cpanel/bin/rado-migrate.php
           test -f deploy/cpanel/bin/rado-tick.php
@@ -34,6 +37,9 @@ jobs:
           test -f deploy/cpanel/admin/dashboard.php
           test -f deploy/cpanel/admin/trips.php
           test -f deploy/cpanel/admin/drivers.php
+          test -f deploy/cpanel/admin/verification.php
+          test -f deploy/cpanel/admin/verification-settings.php
+          test -f deploy/cpanel/admin/driver-document.php
           test -f deploy/cpanel/admin/passengers.php
           test -f deploy/cpanel/admin/operations.php
           test -f deploy/cpanel/admin/finance.php
@@ -54,6 +60,7 @@ jobs:
           test -f deploy/cpanel/api/v1/platform/index.php
           test -f deploy/cpanel/api/v1/trips/change/index.php
           test -f deploy/cpanel/api/v1/driver/documents/index.php
+          test -f deploy/cpanel/api/v1/driver/verification/index.php
           test -f deploy/cpanel/api/v1/trips/status/index.php
           test -f deploy/cpanel/api/v1/driver/session/index.php
           test -f deploy/cpanel/api/v1/driver/presence/index.php
@@ -68,6 +75,7 @@ jobs:
         run: |
           grep -q "/admin/dashboard.php" deploy/cpanel/admin/index.php
           grep -q "/admin/operations.php" deploy/cpanel/admin/_ui.php
+          grep -q "/admin/verification.php" deploy/cpanel/admin/_ui.php
           grep -q "/admin/settings.php" deploy/cpanel/admin/_ui.php
           grep -q "/admin/system.php" deploy/cpanel/admin/_ui.php
           grep -Fq ".nav{display:flex" deploy/cpanel/admin/_ui.php
@@ -134,6 +142,26 @@ jobs:
           grep -q "dispatch.log" deploy/cpanel/rado-system/lib/platform.php
           grep -q "max(45" deploy/cpanel/rado-system/lib/platform.php
 
+      - name: Validate driver verification contracts
+        run: |
+          grep -q "CREATE TABLE IF NOT EXISTS driver_verification_profiles" deploy/cpanel/sql/migrations/043_driver_verification.sql
+          grep -q "CREATE TABLE IF NOT EXISTS driver_verification_checks" deploy/cpanel/sql/migrations/043_driver_verification.sql
+          grep -q "driver_verification_enforced" deploy/cpanel/sql/migrations/043_driver_verification.sql
+          grep -q "Authorization: Bearer" deploy/cpanel/rado-system/lib/api_ir.php
+          grep -q "Shahkar" deploy/cpanel/rado-system/lib/api_ir.php
+          grep -q "VideoLive" deploy/cpanel/rado-system/lib/api_ir.php
+          grep -q "DrivingLisense" deploy/cpanel/rado-system/lib/api_ir.php
+          grep -q "IbanMatchPro" deploy/cpanel/rado-system/lib/api_ir.php
+          grep -q "run_biometric" deploy/cpanel/api/v1/driver/verification/index.php
+          grep -q "send_voice_otp" deploy/cpanel/api/v1/driver/verification/index.php
+          grep -q "driver_verification_required" deploy/cpanel/rado-system/lib/app.php
+          grep -q "rado_verification_missing" deploy/cpanel/admin/drivers.php
+          grep -q "DriverVerificationPage" apps/driver/lib/advanced_driver.dart
+          grep -q "image_picker" apps/driver/pubspec.yaml
+          grep -q "android.permission.CAMERA" .github/workflows/android-driver.yml
+          grep -q "android.permission.CAMERA" .github/workflows/release.yml
+          grep -q "android.permission.RECORD_AUDIO" .github/workflows/release.yml
+
       - name: Validate cPanel API include depth
         run: |
           if grep -R "dirname(__DIR__, 5).*rado-system/lib/app.php" deploy/cpanel/api/v1; then
@@ -154,6 +182,7 @@ jobs:
           grep -q "CREATE TABLE IF NOT EXISTS support_tickets" deploy/cpanel/sql/migrations/040_platform.sql
           grep -q "CREATE TABLE IF NOT EXISTS driver_online_daily" deploy/cpanel/sql/migrations/041_operations.sql
           grep -q "CREATE TABLE IF NOT EXISTS refunds" deploy/cpanel/sql/migrations/041_operations.sql
+          grep -q "CREATE TABLE IF NOT EXISTS driver_verification_profiles" deploy/cpanel/sql/migrations/043_driver_verification.sql
 
   flutter:
     runs-on: ubuntu-latest
