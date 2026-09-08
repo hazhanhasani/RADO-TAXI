@@ -1,7 +1,7 @@
 name: rado_driver
 description: RADO Driver app
 publish_to: none
-version: 0.6.2+6002
+version: 0.6.3+6003
 
 environment:
   sdk: '>=3.10.0 <4.0.0'
