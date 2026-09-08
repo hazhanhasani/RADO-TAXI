@@ -101,7 +101,6 @@ jobs:
         working-directory: apps/passenger
         run: |
           flutter build apk --release \
-            --dart-define=NESHAN_MAP_KEY="$NESHAN_MAP_KEY" \
             --dart-define=RADO_API_BASE_URL="https://rado-taxi.sbs"
 
       - name: Rename APK
