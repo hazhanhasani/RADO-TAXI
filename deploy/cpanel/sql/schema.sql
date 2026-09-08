@@ -74,6 +74,7 @@ CREATE TABLE IF NOT EXISTS trips (
   final_fare BIGINT NULL,
   requested_at DATETIME NOT NULL,
   accepted_at DATETIME NULL,
+  arrived_at DATETIME NULL,
   started_at DATETIME NULL,
   completed_at DATETIME NULL,
   cancelled_at DATETIME NULL,
@@ -156,4 +157,9 @@ CREATE TABLE IF NOT EXISTS system_settings (
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+INSERT INTO system_settings(setting_key,setting_value,is_secret)
+VALUES ('default_driver_commission_rate','10.00',0)
+ON DUPLICATE KEY UPDATE setting_key=VALUES(setting_key);
+
 INSERT INTO schema_migrations(version) VALUES ('cpanel-mysql-0.2.3') ON DUPLICATE KEY UPDATE version=VALUES(version);
+INSERT INTO schema_migrations(version) VALUES ('cpanel-mysql-0.3.0-trip-lifecycle') ON DUPLICATE KEY UPDATE version=VALUES(version);
