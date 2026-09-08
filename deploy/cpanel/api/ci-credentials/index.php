@@ -106,9 +106,11 @@ if ($verified !== 1) fail(401, 'invalid token signature');
 $secrets = require $secretsFile;
 $keystorePath = $root . '/rado-system/private/rado-release.keystore';
 if (!is_file($keystorePath)) fail(503, 'signing keystore missing');
-foreach (['store_password','key_alias','key_password','neshan_map_key'] as $required) {
+foreach (['store_password','key_alias','key_password'] as $required) {
     if (!isset($secrets[$required]) || trim((string)$secrets[$required]) === '') fail(503, 'CI secrets incomplete');
 }
+$webMapKey = trim((string)($secrets['neshan_web_map_key'] ?? $secrets['neshan_map_key'] ?? ''));
+if ($webMapKey === '') fail(503, 'Neshan Web Map Key missing');
 
 echo json_encode([
     'ok' => true,
@@ -116,5 +118,7 @@ echo json_encode([
     'store_password' => (string)$secrets['store_password'],
     'key_alias' => (string)$secrets['key_alias'],
     'key_password' => (string)$secrets['key_password'],
-    'neshan_map_key' => (string)$secrets['neshan_map_key'],
+    'neshan_web_map_key' => $webMapKey,
+    // Legacy field for older CI clients until all workflows are migrated.
+    'neshan_map_key' => $webMapKey,
 ], JSON_UNESCAPED_SLASHES);
