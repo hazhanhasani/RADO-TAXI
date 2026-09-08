@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:neshan_maps_flutter/map.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
 import 'app_update.dart';
 
 void main() => runApp(
@@ -78,6 +79,7 @@ class _PassengerMapPageState extends State<PassengerMapPage> {
   @override
   void dispose() {
     _tripPoller?.cancel();
+    _controller.dispose();
     super.dispose();
   }
 
@@ -91,17 +93,38 @@ class _PassengerMapPageState extends State<PassengerMapPage> {
     if (mounted) setState(() => _clientId = id);
   }
 
+  Future<LatLng> _readExactMapCenter() async {
+    if (!_hasMapKey) return _mapCenter;
+    try {
+      await _controller.ready.timeout(const Duration(seconds: 4));
+      final current = await _controller.getCurrentLocation();
+      if (current != null) {
+        _mapCenter = current;
+        return current;
+      }
+    } catch (_) {
+      // Fall back to the last location callback if the WebView controller is busy.
+    }
+    return _mapCenter;
+  }
+
   Future<void> _resolveCenterAddress() async {
+    final point = await _readExactMapCenter();
     if (!_api.enabled) {
-      setState(() => _centerAddress = 'موقعیت انتخاب‌شده');
+      if (mounted) setState(() => _centerAddress = 'موقعیت انتخاب‌شده');
       return;
     }
-    setState(() => _reverseLoading = true);
+    if (mounted) setState(() => _reverseLoading = true);
     try {
-      final address = await _api.reverse(_mapCenter);
-      if (mounted) setState(() => _centerAddress = address);
-    } catch (_) {
-      if (mounted) setState(() => _centerAddress = 'موقعیت انتخاب‌شده');
+      final address = await _api.reverse(point);
+      if (mounted) {
+        setState(() {
+          _mapCenter = point;
+          _centerAddress = address;
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _centerAddress = _api.messageFromError(e));
     } finally {
       if (mounted) setState(() => _reverseLoading = false);
     }
@@ -111,12 +134,16 @@ class _PassengerMapPageState extends State<PassengerMapPage> {
     await _resolveCenterAddress();
     if (!mounted) return;
 
+    final exactPoint = _mapCenter;
+    final exactLabel = _centerAddress;
+
     if (_selectionStep == 0) {
       setState(() {
-        _origin = _mapCenter;
-        _originLabel = _centerAddress;
+        _origin = exactPoint;
+        _originLabel = exactLabel;
         _selectionStep = 1;
         _destination = null;
+        _destinationLabel = 'مقصد را انتخاب کنید';
         _route = null;
         _fare = null;
         _fareError = null;
@@ -125,8 +152,8 @@ class _PassengerMapPageState extends State<PassengerMapPage> {
     }
 
     setState(() {
-      _destination = _mapCenter;
-      _destinationLabel = _centerAddress;
+      _destination = exactPoint;
+      _destinationLabel = exactLabel;
       _fare = null;
       _fareError = null;
     });
@@ -204,7 +231,11 @@ class _PassengerMapPageState extends State<PassengerMapPage> {
         const SnackBar(content: Text('درخواست سفر ثبت شد و برای راننده‌های نزدیک ارسال شد.')),
       );
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_api.messageFromError(e))));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(_api.messageFromError(e))),
+        );
+      }
     } finally {
       if (mounted) setState(() => _requestLoading = false);
     }
@@ -226,7 +257,7 @@ class _PassengerMapPageState extends State<PassengerMapPage> {
       setState(() => _activeTrip = latest);
       if (latest.isTerminal) _tripPoller?.cancel();
     } catch (_) {
-      // A temporary polling failure should not erase the active ride.
+      // Temporary polling failures should not erase an active trip.
     }
   }
 
@@ -240,9 +271,15 @@ class _PassengerMapPageState extends State<PassengerMapPage> {
       if (!mounted) return;
       setState(() => _activeTrip = latest);
       _tripPoller?.cancel();
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('سفر لغو شد.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('سفر لغو شد.')),
+      );
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(_api.messageFromError(e))));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(_api.messageFromError(e))),
+        );
+      }
     } finally {
       if (mounted) setState(() => _tripActionLoading = false);
     }
@@ -274,13 +311,20 @@ class _PassengerMapPageState extends State<PassengerMapPage> {
             children: [
               Positioned.fill(child: _buildMap()),
               if (_activeTrip == null)
-                const Positioned(top: 142, left: 0, right: 0, child: IgnorePointer(child: _CenterPin())),
+                const Positioned(
+                  top: 142,
+                  left: 0,
+                  right: 0,
+                  child: IgnorePointer(child: _CenterPin()),
+                ),
               Positioned(top: 12, left: 12, right: 12, child: _buildHeader()),
               Positioned(
                 left: 12,
                 right: 12,
                 bottom: 14,
-                child: _activeTrip == null ? _buildBookingCard() : _buildTrackingCard(_activeTrip!),
+                child: _activeTrip == null
+                    ? _buildBookingCard()
+                    : _buildTrackingCard(_activeTrip!),
               ),
             ],
           ),
@@ -293,7 +337,9 @@ class _PassengerMapPageState extends State<PassengerMapPage> {
     if (!_hasMapKey) {
       return Container(
         color: const Color(0xFFECEBE7),
-        child: const Center(child: Icon(Icons.map_outlined, size: 80, color: _black)),
+        child: const Center(
+          child: Icon(Icons.map_outlined, size: 80, color: _black),
+        ),
       );
     }
     return NeshanMap(
@@ -308,12 +354,26 @@ class _PassengerMapPageState extends State<PassengerMapPage> {
         showCurrentLocationButton: true,
       ),
       markers: [
-        if (_origin != null) NeshanMarker(id: 'origin', position: _origin!, color: Colors.green, title: 'مبدا'),
-        if (_destination != null) NeshanMarker(id: 'destination', position: _destination!, color: Colors.red, title: 'مقصد'),
+        if (_origin != null)
+          NeshanMarker(
+            id: 'origin',
+            position: _origin!,
+            color: Colors.green,
+            title: 'مبدا',
+          ),
+        if (_destination != null)
+          NeshanMarker(
+            id: 'destination',
+            position: _destination!,
+            color: Colors.red,
+            title: 'مقصد',
+          ),
       ],
       onLocationChanged: (lat, lng) => _mapCenter = LatLng(lat, lng),
-      onError: (message, exception, stackTrace) => debugPrint('Neshan map error: $message'),
-      onLocationError: (message, exception, stackTrace) => debugPrint('Neshan location error: $message'),
+      onError: (message, exception, stackTrace) =>
+          debugPrint('Neshan map error: $message'),
+      onLocationError: (message, exception, stackTrace) =>
+          debugPrint('Neshan location error: $message'),
     );
   }
 
@@ -328,11 +388,31 @@ class _PassengerMapPageState extends State<PassengerMapPage> {
           children: [
             ClipRRect(
               borderRadius: BorderRadius.circular(15),
-              child: Image.asset('assets/branding/rado-passenger.png', width: 48, height: 48, fit: BoxFit.cover),
+              child: Image.asset(
+                'assets/branding/rado-passenger.png',
+                width: 48,
+                height: 48,
+                fit: BoxFit.cover,
+              ),
             ),
             const SizedBox(width: 12),
-            const Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('RADO', style: TextStyle(fontSize: 21, fontWeight: FontWeight.w900)), Text('تاکسی اینترنتی بانه', style: TextStyle(fontSize: 12))])),
-            IconButton(tooltip: 'سفر جدید', onPressed: _newTrip, icon: const Icon(Icons.refresh_rounded)),
+            const Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'RADO',
+                    style: TextStyle(fontSize: 21, fontWeight: FontWeight.w900),
+                  ),
+                  Text('تاکسی اینترنتی بانه', style: TextStyle(fontSize: 12)),
+                ],
+              ),
+            ),
+            IconButton(
+              tooltip: 'سفر جدید',
+              onPressed: _newTrip,
+              icon: const Icon(Icons.refresh_rounded),
+            ),
           ],
         ),
       ),
@@ -343,113 +423,280 @@ class _PassengerMapPageState extends State<PassengerMapPage> {
     final isOrigin = _selectionStep == 0;
     final hasDestination = _destination != null;
     final busy = _reverseLoading || _routeLoading || _requestLoading;
+
     return Material(
       elevation: 14,
       borderRadius: BorderRadius.circular(28),
       color: Colors.white,
       child: Padding(
         padding: const EdgeInsets.all(18),
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          _PointRow(icon: Icons.radio_button_checked_rounded, color: Colors.green, label: _originLabel, active: isOrigin),
-          const SizedBox(height: 9),
-          _PointRow(icon: Icons.location_on_rounded, color: Colors.red, label: _destinationLabel, active: !isOrigin && !hasDestination),
-          if (_route != null) ...[
-            const SizedBox(height: 12),
-            Row(children: [
-              Expanded(child: _InfoBox(label: 'مسافت', value: _route!.distanceLabel)),
-              const SizedBox(width: 8),
-              Expanded(child: _InfoBox(label: 'زمان تقریبی', value: _route!.durationLabel)),
-            ]),
-          ],
-          if (_fareLoading) ...[const SizedBox(height: 12), const LinearProgressIndicator()],
-          if (_fare != null) ...[
-            const SizedBox(height: 12),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(15),
-              decoration: BoxDecoration(color: _black, borderRadius: BorderRadius.circular(18)),
-              child: Row(children: [const Icon(Icons.payments_rounded, color: _yellow), const SizedBox(width: 10), const Expanded(child: Text('کرایه سفر', style: TextStyle(color: Colors.white70))), Text(_fare!.formattedFare, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 17))]),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _PointRow(
+              icon: Icons.radio_button_checked_rounded,
+              color: Colors.green,
+              label: _originLabel,
+              active: isOrigin,
             ),
-          ],
-          if (_fareError != null) ...[
-            const SizedBox(height: 10),
-            Text(_fareError!, style: const TextStyle(color: Colors.redAccent, fontSize: 12), textAlign: TextAlign.center),
-          ],
-          const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            height: 52,
-            child: FilledButton(
-              onPressed: busy ? null : _selectCurrentPoint,
-              style: FilledButton.styleFrom(backgroundColor: _black),
-              child: Text(isOrigin ? 'تأیید مبدا' : hasDestination ? 'تغییر مقصد روی نقشه' : 'تأیید مقصد و محاسبه کرایه', style: const TextStyle(fontWeight: FontWeight.w900)),
+            const SizedBox(height: 9),
+            _PointRow(
+              icon: Icons.location_on_rounded,
+              color: Colors.red,
+              label: _destinationLabel,
+              active: !isOrigin && !hasDestination,
             ),
-          ),
-          if (_fare != null) ...[
-            const SizedBox(height: 8),
+            if (_route != null) ...[
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: _InfoBox(label: 'مسافت', value: _route!.distanceLabel),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: _InfoBox(label: 'زمان تقریبی', value: _route!.durationLabel),
+                  ),
+                ],
+              ),
+            ],
+            if (_fareLoading) ...[
+              const SizedBox(height: 12),
+              const LinearProgressIndicator(),
+            ],
+            if (_fare != null) ...[
+              const SizedBox(height: 12),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(15),
+                decoration: BoxDecoration(
+                  color: _black,
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.payments_rounded, color: _yellow),
+                    const SizedBox(width: 10),
+                    const Expanded(
+                      child: Text(
+                        'کرایه سفر',
+                        style: TextStyle(color: Colors.white70),
+                      ),
+                    ),
+                    Text(
+                      _fare!.formattedFare,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 17,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+            if (_fareError != null) ...[
+              const SizedBox(height: 10),
+              Text(
+                _fareError!,
+                style: const TextStyle(color: Colors.redAccent, fontSize: 12),
+                textAlign: TextAlign.center,
+              ),
+            ],
+            const SizedBox(height: 12),
             SizedBox(
               width: double.infinity,
-              height: 56,
-              child: FilledButton.icon(
-                onPressed: _requestLoading ? null : _requestTrip,
-                style: FilledButton.styleFrom(backgroundColor: _yellow, foregroundColor: _black),
-                icon: const Icon(Icons.local_taxi_rounded),
-                label: const Text('درخواست RADO', style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16)),
+              height: 52,
+              child: FilledButton(
+                onPressed: busy ? null : _selectCurrentPoint,
+                style: FilledButton.styleFrom(backgroundColor: _black),
+                child: Text(
+                  isOrigin
+                      ? 'تأیید مبدا'
+                      : hasDestination
+                          ? 'تغییر مقصد روی نقشه'
+                          : 'تأیید مقصد و محاسبه کرایه',
+                  style: const TextStyle(fontWeight: FontWeight.w900),
+                ),
               ),
             ),
+            if (_fare != null) ...[
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                height: 56,
+                child: FilledButton.icon(
+                  onPressed: _requestLoading ? null : _requestTrip,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: _yellow,
+                    foregroundColor: _black,
+                  ),
+                  icon: const Icon(Icons.local_taxi_rounded),
+                  label: const Text(
+                    'درخواست RADO',
+                    style: TextStyle(fontWeight: FontWeight.w900, fontSize: 16),
+                  ),
+                ),
+              ),
+            ],
           ],
-        ]),
+        ),
       ),
     );
   }
 
   Widget _buildTrackingCard(PassengerTrip trip) {
-    final canCancel = ['requested', 'searching', 'driver_assigned', 'driver_arriving', 'arrived'].contains(trip.status);
+    final canCancel = [
+      'requested',
+      'searching',
+      'driver_assigned',
+      'driver_arriving',
+      'arrived',
+    ].contains(trip.status);
+
     return Material(
       elevation: 16,
       borderRadius: BorderRadius.circular(28),
       color: Colors.white,
       child: Padding(
         padding: const EdgeInsets.all(18),
-        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            Container(width: 46, height: 46, decoration: BoxDecoration(color: const Color(0xFFFFE59A), borderRadius: BorderRadius.circular(15)), child: const Icon(Icons.local_taxi_rounded)),
-            const SizedBox(width: 10),
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(trip.statusFa, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18)), if (trip.requestedAt.isNotEmpty) Text(trip.requestedAt, style: const TextStyle(color: Colors.black54, fontSize: 11))])),
-          ]),
-          const SizedBox(height: 14),
-          _StatusTimeline(status: trip.status),
-          const SizedBox(height: 14),
-          _PointRow(icon: Icons.radio_button_checked, color: Colors.green, label: trip.pickup.label, active: false),
-          const SizedBox(height: 8),
-          _PointRow(icon: Icons.location_on, color: Colors.red, label: trip.destination.label, active: false),
-          if (trip.driver != null) ...[
-            const SizedBox(height: 12),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(13),
-              decoration: BoxDecoration(color: const Color(0xFFF5F5F2), borderRadius: BorderRadius.circular(17)),
-              child: Row(children: [
-                const CircleAvatar(backgroundColor: _black, foregroundColor: _yellow, child: Icon(Icons.person_rounded)),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Container(
+                  width: 46,
+                  height: 46,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFFE59A),
+                    borderRadius: BorderRadius.circular(15),
+                  ),
+                  child: const Icon(Icons.local_taxi_rounded),
+                ),
                 const SizedBox(width: 10),
-                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(trip.driver!.name, style: const TextStyle(fontWeight: FontWeight.w900)), Text([trip.driver!.vehicle, trip.driver!.plate].where((e) => e.isNotEmpty).join(' · '), style: const TextStyle(fontSize: 11, color: Colors.black54))])),
-              ]),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        trip.statusFa,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w900,
+                          fontSize: 18,
+                        ),
+                      ),
+                      if (trip.requestedAt.isNotEmpty)
+                        Text(
+                          trip.requestedAt,
+                          style: const TextStyle(color: Colors.black54, fontSize: 11),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
             ),
-          ],
-          const SizedBox(height: 12),
-          Row(children: [
-            Expanded(child: _InfoBox(label: trip.status == 'completed' ? 'کرایه نهایی' : 'کرایه تخمینی', value: formatMoney(trip.finalFare ?? trip.estimatedFare))),
-            const SizedBox(width: 8),
-            Expanded(child: _InfoBox(label: 'زمان', value: trip.lastEventTime.isEmpty ? '—' : trip.lastEventTime)),
-          ]),
-          if (trip.isTerminal) ...[
+            const SizedBox(height: 14),
+            _StatusTimeline(status: trip.status),
+            const SizedBox(height: 14),
+            _PointRow(
+              icon: Icons.radio_button_checked,
+              color: Colors.green,
+              label: trip.pickup.label,
+              active: false,
+            ),
+            const SizedBox(height: 8),
+            _PointRow(
+              icon: Icons.location_on,
+              color: Colors.red,
+              label: trip.destination.label,
+              active: false,
+            ),
+            if (trip.driver != null) ...[
+              const SizedBox(height: 12),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(13),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF5F5F2),
+                  borderRadius: BorderRadius.circular(17),
+                ),
+                child: Row(
+                  children: [
+                    const CircleAvatar(
+                      backgroundColor: _black,
+                      foregroundColor: _yellow,
+                      child: Icon(Icons.person_rounded),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            trip.driver!.name,
+                            style: const TextStyle(fontWeight: FontWeight.w900),
+                          ),
+                          Text(
+                            [trip.driver!.vehicle, trip.driver!.plate]
+                                .where((e) => e.isNotEmpty)
+                                .join(' · '),
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: Colors.black54,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             const SizedBox(height: 12),
-            SizedBox(width: double.infinity, child: FilledButton(onPressed: _newTrip, style: FilledButton.styleFrom(backgroundColor: _yellow, foregroundColor: _black), child: const Text('سفر جدید'))),
-          ] else if (canCancel) ...[
-            const SizedBox(height: 9),
-            SizedBox(width: double.infinity, child: TextButton(onPressed: _tripActionLoading ? null : _cancelTrip, child: const Text('لغو سفر'))),
+            Row(
+              children: [
+                Expanded(
+                  child: _InfoBox(
+                    label: trip.status == 'completed' ? 'کرایه نهایی' : 'کرایه تخمینی',
+                    value: formatMoney(trip.finalFare ?? trip.estimatedFare),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: _InfoBox(
+                    label: 'زمان',
+                    value: trip.lastEventTime.isEmpty ? '—' : trip.lastEventTime,
+                  ),
+                ),
+              ],
+            ),
+            if (trip.isTerminal) ...[
+              const SizedBox(height: 12),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: _newTrip,
+                  style: FilledButton.styleFrom(
+                    backgroundColor: _yellow,
+                    foregroundColor: _black,
+                  ),
+                  child: const Text('سفر جدید'),
+                ),
+              ),
+            ] else if (canCancel) ...[
+              const SizedBox(height: 9),
+              SizedBox(
+                width: double.infinity,
+                child: TextButton(
+                  onPressed: _tripActionLoading ? null : _cancelTrip,
+                  child: const Text('لغو سفر'),
+                ),
+              ),
+            ],
           ],
-        ]),
+        ),
       ),
     );
   }
@@ -458,25 +705,85 @@ class _PassengerMapPageState extends State<PassengerMapPage> {
 class _StatusTimeline extends StatelessWidget {
   const _StatusTimeline({required this.status});
   final String status;
-  int get step => switch (status) {'driver_assigned' || 'driver_arriving' => 1, 'arrived' => 2, 'in_progress' => 3, 'completed' => 4, _ => 0};
+
+  int get step => switch (status) {
+        'driver_assigned' || 'driver_arriving' => 1,
+        'arrived' => 2,
+        'in_progress' => 3,
+        'completed' => 4,
+        _ => 0,
+      };
+
   @override
   Widget build(BuildContext context) {
     const labels = ['درخواست', 'راننده در راه', 'رسید', 'در سفر', 'پایان'];
-    return Row(children: List.generate(labels.length, (i) => Expanded(child: Column(children: [Container(width: 13, height: 13, decoration: BoxDecoration(shape: BoxShape.circle, color: i <= step ? _yellow : Colors.black12, border: Border.all(color: _black))), const SizedBox(height: 4), Text(labels[i], textAlign: TextAlign.center, style: TextStyle(fontSize: 9, fontWeight: i <= step ? FontWeight.w800 : FontWeight.normal))]))));
+    return Row(
+      children: List.generate(
+        labels.length,
+        (i) => Expanded(
+          child: Column(
+            children: [
+              Container(
+                width: 13,
+                height: 13,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: i <= step ? _yellow : Colors.black12,
+                  border: Border.all(color: _black),
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                labels[i],
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 9,
+                  fontWeight: i <= step ? FontWeight.w800 : FontWeight.normal,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 
 class _PointRow extends StatelessWidget {
-  const _PointRow({required this.icon, required this.color, required this.label, required this.active});
+  const _PointRow({
+    required this.icon,
+    required this.color,
+    required this.label,
+    required this.active,
+  });
+
   final IconData icon;
   final Color color;
   final String label;
   final bool active;
+
   @override
   Widget build(BuildContext context) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-        decoration: BoxDecoration(color: active ? const Color(0xFFFFFAE9) : const Color(0xFFF7F7F7), borderRadius: BorderRadius.circular(17), border: Border.all(color: active ? _yellow : Colors.transparent)),
-        child: Row(children: [Icon(icon, color: color), const SizedBox(width: 9), Expanded(child: Text(label.isEmpty ? 'آدرس در دسترس نیست' : label, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12)))]),
+        decoration: BoxDecoration(
+          color: active ? const Color(0xFFFFFAE9) : const Color(0xFFF7F7F7),
+          borderRadius: BorderRadius.circular(17),
+          border: Border.all(color: active ? _yellow : Colors.transparent),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: color),
+            const SizedBox(width: 9),
+            Expanded(
+              child: Text(
+                label.isEmpty ? 'آدرس در دسترس نیست' : label,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12),
+              ),
+            ),
+          ],
+        ),
       );
 }
 
@@ -484,62 +791,149 @@ class _InfoBox extends StatelessWidget {
   const _InfoBox({required this.label, required this.value});
   final String label;
   final String value;
+
   @override
-  Widget build(BuildContext context) => Container(padding: const EdgeInsets.all(12), decoration: BoxDecoration(color: const Color(0xFFFFF7DA), borderRadius: BorderRadius.circular(15)), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text(label, style: const TextStyle(fontSize: 10, color: Colors.black54)), const SizedBox(height: 3), Text(value, maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w900))]));
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: const Color(0xFFFFF7DA),
+          borderRadius: BorderRadius.circular(15),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              label,
+              style: const TextStyle(fontSize: 10, color: Colors.black54),
+            ),
+            const SizedBox(height: 3),
+            Text(
+              value,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontWeight: FontWeight.w900),
+            ),
+          ],
+        ),
+      );
 }
 
 class _CenterPin extends StatelessWidget {
   const _CenterPin();
+
   @override
-  Widget build(BuildContext context) => Transform.translate(offset: const Offset(0, -24), child: Column(mainAxisSize: MainAxisSize.min, children: [Container(width: 52, height: 52, decoration: BoxDecoration(color: _yellow, shape: BoxShape.circle, border: Border.all(color: _black, width: 4)), child: const Icon(Icons.local_taxi_rounded, size: 28)), Container(width: 4, height: 20, color: _black)]));
+  Widget build(BuildContext context) => Transform.translate(
+        offset: const Offset(0, -24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 52,
+              height: 52,
+              decoration: BoxDecoration(
+                color: _yellow,
+                shape: BoxShape.circle,
+                border: Border.all(color: _black, width: 4),
+              ),
+              child: const Icon(Icons.local_taxi_rounded, size: 28),
+            ),
+            Container(width: 4, height: 20, color: _black),
+          ],
+        ),
+      );
 }
 
 class PassengerApi {
   PassengerApi()
-      : _dio = Dio(BaseOptions(
-          baseUrl: _apiBaseUrl,
-          connectTimeout: const Duration(seconds: 8),
-          receiveTimeout: const Duration(seconds: 12),
-          headers: const {'Accept': 'application/json'},
-        ));
+      : _dio = Dio(
+          BaseOptions(
+            baseUrl: _apiBaseUrl,
+            connectTimeout: const Duration(seconds: 8),
+            receiveTimeout: const Duration(seconds: 12),
+            headers: const {'Accept': 'application/json'},
+            followRedirects: false,
+            validateStatus: (status) => status != null && status < 400,
+          ),
+        );
+
   final Dio _dio;
   bool get enabled => _apiBaseUrl.trim().isNotEmpty;
 
   Future<String> reverse(LatLng point) async {
-    final r = await _dio.get<Map<String, dynamic>>('/api/v1/maps/reverse', queryParameters: {'lat': point.latitude, 'lng': point.longitude});
-    return (r.data?['formatted_address'] ?? 'موقعیت انتخاب‌شده').toString();
+    final r = await _dio.get<Map<String, dynamic>>(
+      '/api/v1/maps/reverse/',
+      queryParameters: {'lat': point.latitude, 'lng': point.longitude},
+    );
+    final data = r.data ?? const <String, dynamic>{};
+    return (data['formatted_address'] ?? 'موقعیت انتخاب‌شده').toString();
   }
 
   Future<RouteSummary> route(LatLng origin, LatLng destination) async {
-    final r = await _dio.get<Map<String, dynamic>>('/api/v1/maps/route', queryParameters: {'origin': '${origin.latitude},${origin.longitude}', 'destination': '${destination.latitude},${destination.longitude}'});
+    final r = await _dio.get<Map<String, dynamic>>(
+      '/api/v1/maps/route/',
+      queryParameters: {
+        'origin': '${origin.latitude},${origin.longitude}',
+        'destination': '${destination.latitude},${destination.longitude}',
+      },
+    );
     final d = r.data ?? const <String, dynamic>{};
-    return RouteSummary(distanceMeters: (d['distance_meters'] as num?)?.toDouble() ?? 0, durationSeconds: (d['duration_seconds'] as num?)?.toDouble() ?? 0);
+    return RouteSummary(
+      distanceMeters: (d['distance_meters'] as num?)?.toDouble() ?? 0,
+      durationSeconds: (d['duration_seconds'] as num?)?.toDouble() ?? 0,
+    );
   }
 
   Future<FareEstimate> estimateFare(RouteSummary route) async {
-    final r = await _dio.post<Map<String, dynamic>>('/api/v1/fare/estimate', data: {'distance_meters': route.distanceMeters.round(), 'duration_seconds': route.durationSeconds.round()});
+    final r = await _dio.post<Map<String, dynamic>>(
+      '/api/v1/fare/estimate/',
+      data: {
+        'distance_meters': route.distanceMeters.round(),
+        'duration_seconds': route.durationSeconds.round(),
+      },
+    );
     final d = r.data ?? const <String, dynamic>{};
     return FareEstimate(fare: (d['fare'] as num?)?.toInt() ?? 0);
   }
 
-  Future<PassengerTrip> requestTrip({required String clientId, required LatLng origin, required LatLng destination, required String pickupLabel, required String destinationLabel, required RouteSummary route}) async {
-    final r = await _dio.post<Map<String, dynamic>>('/api/v1/trips', data: {
-      'client_id': clientId,
-      'pickup': {'lat': origin.latitude, 'lng': origin.longitude},
-      'destination': {'lat': destination.latitude, 'lng': destination.longitude},
-      'pickup_label': pickupLabel,
-      'destination_label': destinationLabel,
-      'distance_meters': route.distanceMeters.round(),
-      'duration_seconds': route.durationSeconds.round(),
-    });
+  Future<PassengerTrip> requestTrip({
+    required String clientId,
+    required LatLng origin,
+    required LatLng destination,
+    required String pickupLabel,
+    required String destinationLabel,
+    required RouteSummary route,
+  }) async {
+    final r = await _dio.post<Map<String, dynamic>>(
+      '/api/v1/trips/',
+      data: {
+        'client_id': clientId,
+        'pickup': {'lat': origin.latitude, 'lng': origin.longitude},
+        'destination': {
+          'lat': destination.latitude,
+          'lng': destination.longitude,
+        },
+        'pickup_label': pickupLabel,
+        'destination_label': destinationLabel,
+        'distance_meters': route.distanceMeters.round(),
+        'duration_seconds': route.durationSeconds.round(),
+      },
+    );
     final trip = (r.data?['trip'] as Map?)?.cast<String, dynamic>() ?? const {};
     final id = (trip['id'] ?? '').toString();
     return PassengerTrip(
       id: id,
       status: (trip['status'] ?? 'searching').toString(),
-      statusFa: 'در جستجوی راننده',
-      pickup: TripPoint(lat: origin.latitude, lng: origin.longitude, label: pickupLabel),
-      destination: TripPoint(lat: destination.latitude, lng: destination.longitude, label: destinationLabel),
+      statusFa: (trip['status_fa'] ?? 'در جستجوی راننده').toString(),
+      pickup: TripPoint(
+        lat: origin.latitude,
+        lng: origin.longitude,
+        label: pickupLabel,
+      ),
+      destination: TripPoint(
+        lat: destination.latitude,
+        lng: destination.longitude,
+        label: destinationLabel,
+      ),
       estimatedFare: (trip['estimated_fare'] as num?)?.toInt() ?? 0,
       finalFare: null,
       requestedAt: '',
@@ -549,36 +943,81 @@ class PassengerApi {
   }
 
   Future<PassengerTrip> tripStatus(String clientId, String tripId) async {
-    final r = await _dio.get<Map<String, dynamic>>('/api/v1/trips/status', queryParameters: {'client_id': clientId, 'trip_id': tripId});
-    return PassengerTrip.fromJson((r.data?['trip'] as Map?)?.cast<String, dynamic>() ?? const {});
+    final r = await _dio.get<Map<String, dynamic>>(
+      '/api/v1/trips/status/',
+      queryParameters: {'client_id': clientId, 'trip_id': tripId},
+    );
+    return PassengerTrip.fromJson(
+      (r.data?['trip'] as Map?)?.cast<String, dynamic>() ?? const {},
+    );
   }
 
   Future<PassengerTrip> cancelTrip(String clientId, String tripId) async {
-    final r = await _dio.post<Map<String, dynamic>>('/api/v1/trips/status', data: {'client_id': clientId, 'trip_id': tripId, 'action': 'cancel'});
-    return PassengerTrip.fromJson((r.data?['trip'] as Map?)?.cast<String, dynamic>() ?? const {});
+    final r = await _dio.post<Map<String, dynamic>>(
+      '/api/v1/trips/status/',
+      data: {
+        'client_id': clientId,
+        'trip_id': tripId,
+        'action': 'cancel',
+      },
+    );
+    return PassengerTrip.fromJson(
+      (r.data?['trip'] as Map?)?.cast<String, dynamic>() ?? const {},
+    );
   }
 
   String messageFromError(Object error) {
     if (error is DioException) {
       final data = error.response?.data;
-      if (data is Map && data['message'] != null) return data['message'].toString();
-      if (error.type == DioExceptionType.connectionTimeout || error.type == DioExceptionType.receiveTimeout) return 'ارتباط با سرور RADO طول کشید.';
+      if (data is Map && data['message'] != null) {
+        return data['message'].toString();
+      }
+      if (data is Map && data['error'] != null) {
+        final code = data['error'].toString();
+        return switch (code) {
+          'pricing_not_configured' => 'تعرفه سفر در پنل مدیریت تنظیم نشده است.',
+          'database_not_configured' => 'دیتابیس RADO آماده نیست.',
+          'fare_estimate_failed' => 'محاسبه کرایه در سرور ناموفق بود.',
+          'method_not_allowed' => 'مسیر درخواست روی سرور درست تنظیم نشده است.',
+          'neshan_reverse_failed' => 'دریافت نام دقیق مکان از نشان ناموفق بود.',
+          _ => 'خطای سرور RADO: $code',
+        };
+      }
+      if (error.type == DioExceptionType.connectionTimeout ||
+          error.type == DioExceptionType.receiveTimeout) {
+        return 'ارتباط با سرور RADO طول کشید.';
+      }
+      final status = error.response?.statusCode;
+      if (status != null) return 'سرور RADO پاسخ نامعتبر داد (HTTP $status).';
     }
     return 'امکان انجام درخواست وجود ندارد. دوباره تلاش کنید.';
   }
 }
 
 class RouteSummary {
-  const RouteSummary({required this.distanceMeters, required this.durationSeconds});
+  const RouteSummary({
+    required this.distanceMeters,
+    required this.durationSeconds,
+  });
+
   final double distanceMeters;
   final double durationSeconds;
+
   factory RouteSummary.fallback(LatLng origin, LatLng destination) {
     const distance = Distance();
     final meters = distance.as(LengthUnit.Meter, origin, destination);
-    return RouteSummary(distanceMeters: meters, durationSeconds: (meters / 1000) / 28 * 3600);
+    return RouteSummary(
+      distanceMeters: meters,
+      durationSeconds: (meters / 1000) / 28 * 3600,
+    );
   }
-  String get distanceLabel => distanceMeters < 1000 ? '${distanceMeters.round()} متر' : '${(distanceMeters / 1000).toStringAsFixed(1)} کیلومتر';
-  String get durationLabel => '${(durationSeconds / 60).round().clamp(1, 999)} دقیقه';
+
+  String get distanceLabel => distanceMeters < 1000
+      ? '${distanceMeters.round()} متر'
+      : '${(distanceMeters / 1000).toStringAsFixed(1)} کیلومتر';
+
+  String get durationLabel =>
+      '${(durationSeconds / 60).round().clamp(1, 999)} دقیقه';
 }
 
 class FareEstimate {
@@ -588,7 +1027,19 @@ class FareEstimate {
 }
 
 class PassengerTrip {
-  const PassengerTrip({required this.id, required this.status, required this.statusFa, required this.pickup, required this.destination, required this.estimatedFare, required this.finalFare, required this.requestedAt, required this.lastEventTime, required this.driver});
+  const PassengerTrip({
+    required this.id,
+    required this.status,
+    required this.statusFa,
+    required this.pickup,
+    required this.destination,
+    required this.estimatedFare,
+    required this.finalFare,
+    required this.requestedAt,
+    required this.lastEventTime,
+    required this.driver,
+  });
+
   final String id;
   final String status;
   final String statusFa;
@@ -599,23 +1050,44 @@ class PassengerTrip {
   final String requestedAt;
   final String lastEventTime;
   final TripDriver? driver;
-  bool get isTerminal => ['completed', 'cancelled_by_passenger', 'cancelled_by_driver', 'cancelled_by_admin', 'expired'].contains(status);
+
+  bool get isTerminal => [
+        'completed',
+        'cancelled_by_passenger',
+        'cancelled_by_driver',
+        'cancelled_by_admin',
+        'expired',
+      ].contains(status);
 
   factory PassengerTrip.fromJson(Map<String, dynamic> j) {
     final times = (j['times'] as Map?)?.cast<String, dynamic>() ?? const {};
-    String jalali(String key) => (((times[key] as Map?)?['jalali']) ?? '').toString();
-    final event = [jalali('completed'), jalali('started'), jalali('arrived'), jalali('accepted'), jalali('requested')].firstWhere((e) => e.isNotEmpty, orElse: () => '');
+    String jalali(String key) =>
+        (((times[key] as Map?)?['jalali']) ?? '').toString();
+    final event = [
+      jalali('completed'),
+      jalali('started'),
+      jalali('arrived'),
+      jalali('accepted'),
+      jalali('requested'),
+    ].firstWhere((e) => e.isNotEmpty, orElse: () => '');
+
     return PassengerTrip(
       id: (j['id'] ?? '').toString(),
       status: (j['status'] ?? '').toString(),
       statusFa: (j['status_fa'] ?? '').toString(),
-      pickup: TripPoint.fromJson((j['pickup'] as Map?)?.cast<String, dynamic>() ?? const {}),
-      destination: TripPoint.fromJson((j['destination'] as Map?)?.cast<String, dynamic>() ?? const {}),
+      pickup: TripPoint.fromJson(
+        (j['pickup'] as Map?)?.cast<String, dynamic>() ?? const {},
+      ),
+      destination: TripPoint.fromJson(
+        (j['destination'] as Map?)?.cast<String, dynamic>() ?? const {},
+      ),
       estimatedFare: (j['estimated_fare'] as num?)?.toInt() ?? 0,
       finalFare: (j['final_fare'] as num?)?.toInt(),
       requestedAt: jalali('requested'),
       lastEventTime: event,
-      driver: j['driver'] is Map ? TripDriver.fromJson((j['driver'] as Map).cast<String, dynamic>()) : null,
+      driver: j['driver'] is Map
+          ? TripDriver.fromJson((j['driver'] as Map).cast<String, dynamic>())
+          : null,
     );
   }
 }
@@ -625,15 +1097,30 @@ class TripPoint {
   final double lat;
   final double lng;
   final String label;
-  factory TripPoint.fromJson(Map<String, dynamic> j) => TripPoint(lat: (j['lat'] as num?)?.toDouble() ?? 0, lng: (j['lng'] as num?)?.toDouble() ?? 0, label: (j['label'] ?? '').toString());
+
+  factory TripPoint.fromJson(Map<String, dynamic> j) => TripPoint(
+        lat: (j['lat'] as num?)?.toDouble() ?? 0,
+        lng: (j['lng'] as num?)?.toDouble() ?? 0,
+        label: (j['label'] ?? '').toString(),
+      );
 }
 
 class TripDriver {
-  const TripDriver({required this.name, required this.plate, required this.vehicle});
+  const TripDriver({
+    required this.name,
+    required this.plate,
+    required this.vehicle,
+  });
+
   final String name;
   final String plate;
   final String vehicle;
-  factory TripDriver.fromJson(Map<String, dynamic> j) => TripDriver(name: (j['name'] ?? 'راننده رادو').toString(), plate: (j['plate'] ?? '').toString(), vehicle: (j['vehicle'] ?? '').toString());
+
+  factory TripDriver.fromJson(Map<String, dynamic> j) => TripDriver(
+        name: (j['name'] ?? 'راننده رادو').toString(),
+        plate: (j['plate'] ?? '').toString(),
+        vehicle: (j['vehicle'] ?? '').toString(),
+      );
 }
 
 String formatMoney(int value) {
