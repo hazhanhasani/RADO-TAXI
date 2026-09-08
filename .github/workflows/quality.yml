@@ -25,6 +25,7 @@ jobs:
           test -f deploy/cpanel/rado-system/lib/payments.php
           test -f deploy/cpanel/rado-system/lib/migrate.php
           test -f deploy/cpanel/rado-system/lib/tick.php
+          test -f deploy/cpanel/rado-system/bin/rado-update-core.php
           test -f deploy/cpanel/bin/rado-migrate.php
           test -f deploy/cpanel/bin/rado-tick.php
           test -f deploy/cpanel/bin/rado-update.php
@@ -48,14 +49,25 @@ jobs:
 
       - name: Shared-hosting updater guard
         run: |
-          if grep -E '\b(exec|shell_exec|system|passthru|proc_open)\s*\(' deploy/cpanel/bin/rado-update.php; then
-            echo "Updater must not depend on disabled shell functions on shared hosting"
-            exit 1
-          fi
-          grep -q "rado_run_database_migrations" deploy/cpanel/bin/rado-update.php
-          grep -q "rado_run_platform_tick" deploy/cpanel/bin/rado-update.php
+          for f in deploy/cpanel/bin/rado-update.php deploy/cpanel/rado-system/bin/rado-update-core.php; do
+            if grep -E '\b(exec|shell_exec|system|passthru|proc_open)\s*\(' "$f"; then
+              echo "Updater must not depend on disabled shell functions on shared hosting: $f"
+              exit 1
+            fi
+          done
+          grep -q "rado-update-core.php" deploy/cpanel/bin/rado-update.php
+          grep -q "rado_run_database_migrations" deploy/cpanel/rado-system/bin/rado-update-core.php
+          grep -q "rado_run_platform_tick" deploy/cpanel/rado-system/bin/rado-update-core.php
           grep -q "function rado_run_database_migrations" deploy/cpanel/rado-system/lib/migrate.php
           grep -q "function rado_run_platform_tick" deploy/cpanel/rado-system/lib/tick.php
+
+      - name: Validate dispatch v2 contract
+        run: |
+          grep -q "require_once dirname(__DIR__, 4) . '/rado-system/lib/platform.php'" deploy/cpanel/api/v1/driver/offers/index.php
+          grep -q "rado_offer_waiting_trip_to_driver_v2" deploy/cpanel/api/v1/driver/offers/index.php
+          grep -q "rado_reoffer_expired_to_driver_v2" deploy/cpanel/rado-system/lib/platform.php
+          grep -q "dispatch.log" deploy/cpanel/rado-system/lib/platform.php
+          grep -q "max(45" deploy/cpanel/rado-system/lib/platform.php
 
       - name: Validate cPanel API include depth
         run: |
