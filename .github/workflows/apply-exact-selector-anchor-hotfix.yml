@@ -1,0 +1,58 @@
+name: Apply Exact Selector Anchor Hotfix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/RADO_EXACT_SELECTOR_ANCHOR'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply exact anchor hotfix
+        run: python3 scripts/apply_exact_selector_anchor_hotfix.py
+
+      - name: Verify source guards
+        run: |
+          grep -q "width: 0" apps/passenger/lib/runtime_passenger.dart
+          grep -q "height: 0" apps/passenger/lib/runtime_passenger.dart
+          grep -q "_SelectionPinNeedlePainter" apps/passenger/lib/runtime_passenger.dart
+          grep -q "Positioned(" apps/passenger/lib/runtime_passenger.dart
+          grep -q "bottom: 0" apps/passenger/lib/runtime_passenger.dart
+          ! grep -q "Offset(0, -54)" apps/passenger/lib/runtime_passenger.dart
+          git diff --check
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Analyze passenger
+        working-directory: apps/passenger
+        run: |
+          mkdir -p assets/branding
+          printf '%s' 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZfWQAAAAASUVORK5CYII=' | base64 -d > assets/branding/rado-passenger.png
+          flutter pub get
+          flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      - name: Commit hotfix
+        run: |
+          git config user.name "RADO Release Bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add apps/passenger/lib/runtime_passenger.dart
+          if git diff --cached --quiet; then
+            echo "No source changes to commit"
+            exit 0
+          fi
+          git commit -m "fix(passenger): anchor selector tip exactly to map center"
+          git push origin main
