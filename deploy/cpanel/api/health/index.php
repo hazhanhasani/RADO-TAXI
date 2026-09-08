@@ -41,9 +41,10 @@ if (($_GET['service'] ?? '') === 'reverse') {
         jsonResponse(503, ['ok' => false, 'error' => 'neshan_api_key_missing']);
     }
 
-    $cacheDir = $root . '/rado-system/state/reverse-geocoding';
+    // v2 cache key intentionally invalidates old address-only cache entries.
+    $cacheDir = $root . '/rado-system/state/reverse-geocoding-v2';
     @mkdir($cacheDir, 0755, true);
-    $cacheKey = hash('sha256', number_format($lat, 5, '.', '') . ',' . number_format($lng, 5, '.', ''));
+    $cacheKey = hash('sha256', 'v2|' . number_format($lat, 5, '.', '') . ',' . number_format($lng, 5, '.', ''));
     $cacheFile = $cacheDir . '/' . $cacheKey . '.json';
     if (is_file($cacheFile) && filemtime($cacheFile) > time() - 2592000) {
         $cached = json_decode((string)file_get_contents($cacheFile), true);
@@ -85,25 +86,39 @@ if (($_GET['service'] ?? '') === 'reverse') {
         jsonResponse(502, ['ok' => false, 'error' => 'invalid_neshan_response']);
     }
 
-    $formatted = trim((string)($data['formatted_address'] ?? ''));
-    if ($formatted === '') {
+    $place = trim((string)($data['place'] ?? ''));
+    $address = trim((string)($data['formatted_address'] ?? ''));
+    if ($address === '') {
         $parts = [];
-        foreach (['city', 'neighbourhood', 'route_name'] as $field) {
+        foreach (['state', 'city', 'neighbourhood', 'route_name'] as $field) {
             $value = trim((string)($data[$field] ?? ''));
             if ($value !== '' && !in_array($value, $parts, true)) {
                 $parts[] = $value;
             }
         }
-        $formatted = implode('، ', $parts);
+        $address = implode('، ', $parts);
     }
 
-    if ($formatted === '') {
+    // When Neshan recognizes a POI/building, show its exact name first.
+    $displayAddress = $address;
+    if ($place !== '') {
+        if ($displayAddress === '') {
+            $displayAddress = $place;
+        } elseif (mb_stripos($displayAddress, $place, 0, 'UTF-8') === false) {
+            $displayAddress = $place . '، ' . $displayAddress;
+        }
+    }
+
+    if ($displayAddress === '') {
         jsonResponse(404, ['ok' => false, 'error' => 'address_not_found']);
     }
 
     $result = [
         'ok' => true,
-        'formatted_address' => $formatted,
+        'formatted_address' => $displayAddress,
+        'place_name' => $place !== '' ? $place : null,
+        'address_without_place' => $address !== '' ? $address : null,
+        'state' => $data['state'] ?? null,
         'city' => $data['city'] ?? null,
         'neighbourhood' => $data['neighbourhood'] ?? null,
         'route_name' => $data['route_name'] ?? null,
@@ -130,6 +145,7 @@ $result = [
     'time' => rado_jalali_datetime(null, true),
     'time_long' => rado_jalali_long(),
     'database' => 'not_configured',
+    'pricing' => 'unknown',
     'updater' => [
         'last_success_at' => $lastSuccessRaw !== null && $lastSuccessRaw !== ''
             ? (preg_match('/^\d{4}-\d{2}-\d{2}T|^\d{4}-\d{2}-\d{2} /', $lastSuccessRaw) ? rado_jalali_datetime($lastSuccessRaw, true) : $lastSuccessRaw)
@@ -143,8 +159,10 @@ if (is_file($dbFile)) {
         $pdo = rado_db();
         $pdo->query('SELECT 1');
         $result['database'] = 'ok';
+        $result['pricing'] = rado_active_pricing_rule($pdo) !== null ? 'ok' : 'not_configured';
     } catch (Throwable $e) {
         $result['database'] = 'error';
+        $result['pricing'] = 'unavailable';
     }
 }
 
