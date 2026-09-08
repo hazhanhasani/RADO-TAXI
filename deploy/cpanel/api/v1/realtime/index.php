@@ -3,24 +3,94 @@ declare(strict_types=1);
 require dirname(__DIR__, 3) . '/rado-system/lib/app.php';
 
 if($_SERVER['REQUEST_METHOD']!=='GET')rado_json(405,['ok'=>false,'error'=>'method_not_allowed']);
+
+function rado_realtime_sse_send(string $event,array $payload,?int $id=null):void{
+  if($id!==null)echo 'id: '.$id."\n";
+  echo 'event: '.$event."\n";
+  echo 'data: '.json_encode($payload,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES)."\n\n";
+  @flush();
+}
+
+function rado_realtime_stream(PDO $pdo,string $channel,int $lastId):never{
+  @set_time_limit(30);
+  @ini_set('zlib.output_compression','0');
+  @ini_set('output_buffering','0');
+  while(ob_get_level()>0){@ob_end_flush();}
+  header('Content-Type: text/event-stream; charset=utf-8');
+  header('Cache-Control: no-cache, no-store, must-revalidate');
+  header('Pragma: no-cache');
+  header('X-Accel-Buffering: no');
+  header('Connection: keep-alive');
+
+  if($lastId===0){
+    $mx=$pdo->prepare('SELECT COALESCE(MAX(id),0) FROM realtime_events WHERE channel=?');
+    $mx->execute([$channel]);
+    $lastId=(int)$mx->fetchColumn();
+  }
+
+  rado_realtime_sse_send('ready',['ok'=>true,'channel'=>$channel,'last_event_id'=>$lastId,'server_time'=>rado_time_payload()]);
+  $stmt=$pdo->prepare('SELECT id,event_type,payload_json,created_at FROM realtime_events WHERE channel=? AND id>? AND expires_at>NOW() ORDER BY id ASC LIMIT 100');
+  $started=microtime(true);$heartbeatAt=0.0;
+  while(!connection_aborted()&&microtime(true)-$started<24.0){
+    $stmt->execute([$channel,$lastId]);
+    foreach($stmt->fetchAll() as $row){
+      $id=(int)$row['id'];$payload=json_decode((string)$row['payload_json'],true);if(!is_array($payload))$payload=[];
+      rado_realtime_sse_send('rado_event',['id'=>$id,'event_type'=>(string)$row['event_type'],'payload'=>$payload,'created_at'=>rado_time_payload((string)$row['created_at'])],$id);
+      $lastId=$id;
+    }
+    $now=microtime(true);
+    if($now-$heartbeatAt>=8.0){rado_realtime_sse_send('heartbeat',['last_event_id'=>$lastId,'server_time'=>rado_time_payload()]);$heartbeatAt=$now;}
+    usleep(500000);
+  }
+  rado_realtime_sse_send('reconnect',['last_event_id'=>$lastId]);
+  exit;
+}
+
 try{
  $pdo=rado_db();
  $clientId=trim((string)($_GET['client_id']??''));
  $tripId=trim((string)($_GET['trip_id']??''));
  $role=(string)($_GET['role']??'passenger');
- if($clientId===''||$tripId==='')rado_json(422,['ok'=>false,'error'=>'trip_required']);
+ $scope=(string)($_GET['scope']??'trip');
+ if($clientId==='')rado_json(422,['ok'=>false,'error'=>'client_id_required']);
 
+ $trip=null;$userId=null;$channel='';
  if($role==='driver'){
    $driver=rado_driver_from_client($pdo,$clientId);$userId=$driver['id']??null;
-   $check=$pdo->prepare('SELECT * FROM trips WHERE id=? AND driver_id=? LIMIT 1');
+   if(!$userId)rado_json(403,['ok'=>false,'error'=>'unauthorized']);
+   if($scope==='driver'&&$tripId===''){
+     $channel='driver:'.$userId;
+   }else{
+     if($tripId==='')rado_json(422,['ok'=>false,'error'=>'trip_required']);
+     $check=$pdo->prepare('SELECT * FROM trips WHERE id=? AND driver_id=? LIMIT 1');$check->execute([$tripId,$userId]);$trip=$check->fetch();
+     if(!is_array($trip))rado_json(404,['ok'=>false,'error'=>'trip_not_found']);
+     $channel='trip:'.$tripId;
+   }
  }else{
+   if($tripId==='')rado_json(422,['ok'=>false,'error'=>'trip_required']);
    $userId=rado_passenger_from_client($pdo,$clientId);
-   $check=$pdo->prepare('SELECT * FROM trips WHERE id=? AND passenger_id=? LIMIT 1');
+   if(!$userId)rado_json(403,['ok'=>false,'error'=>'unauthorized']);
+   $check=$pdo->prepare('SELECT * FROM trips WHERE id=? AND passenger_id=? LIMIT 1');$check->execute([$tripId,$userId]);$trip=$check->fetch();
+   if(!is_array($trip))rado_json(404,['ok'=>false,'error'=>'trip_not_found']);
+   $channel='trip:'.$tripId;
  }
- if(!$userId)rado_json(403,['ok'=>false,'error'=>'unauthorized']);
- $check->execute([$tripId,$userId]);$trip=$check->fetch();
- if(!is_array($trip))rado_json(404,['ok'=>false,'error'=>'trip_not_found']);
 
+ if(isset($_GET['stream'])){
+   $lastId=max(0,(int)($_SERVER['HTTP_LAST_EVENT_ID']??0),(int)($_GET['since_event_id']??0));
+   rado_realtime_stream($pdo,$channel,$lastId);
+ }
+
+ $since=max(0,(int)($_GET['since_event_id']??0));
+ $ev=$pdo->prepare('SELECT id,event_type,payload_json,created_at FROM realtime_events WHERE channel=? AND id>? AND expires_at>NOW() ORDER BY id ASC LIMIT 100');
+ $ev->execute([$channel,$since]);$events=$ev->fetchAll();
+ foreach($events as &$x){$x['payload']=json_decode((string)$x['payload_json'],true)?:[];$x['created_at_jalali']=rado_jalali_datetime((string)$x['created_at']);unset($x['payload_json'],$x['created_at']);}
+ unset($x);
+
+ if($scope==='driver'&&$role==='driver'&&$tripId===''){
+   rado_json(200,['ok'=>true,'channel'=>$channel,'events'=>$events,'server_time'=>rado_time_payload()]);
+ }
+
+ if(!is_array($trip))rado_json(404,['ok'=>false,'error'=>'trip_not_found']);
  $driverPosition=null;$driverProfile=null;$eta=null;
  if(!empty($trip['driver_id'])){
    $driverId=(string)$trip['driver_id'];
@@ -62,11 +132,6 @@ try{
    }
  }
 
- $since=max(0,(int)($_GET['since_event_id']??0));
- $ev=$pdo->prepare('SELECT id,event_type,payload_json,created_at FROM realtime_events WHERE channel=? AND id>? AND expires_at>NOW() ORDER BY id ASC LIMIT 100');
- $ev->execute(['trip:'.$tripId,$since]);$events=$ev->fetchAll();
- foreach($events as &$x){$x['payload']=json_decode((string)$x['payload_json'],true)?:[];$x['created_at_jalali']=rado_jalali_datetime((string)$x['created_at']);unset($x['payload_json'],$x['created_at']);}
-
  rado_json(200,[
    'ok'=>true,'trip_id'=>$tripId,'status'=>(string)$trip['status'],
    'driver_position'=>$driverPosition,'driver_profile'=>$driverProfile,'eta'=>$eta,
@@ -75,5 +140,10 @@ try{
 }catch(Throwable $e){
  $id=substr(bin2hex(random_bytes(8)),0,12);
  try{$dir=rado_root().'/rado-system/state';@mkdir($dir,0755,true);@file_put_contents($dir.'/realtime-errors.log','['.rado_jalali_datetime(null,true).'] '.$id.' '.$e->getMessage()."\n",FILE_APPEND|LOCK_EX);}catch(Throwable){}
+ if(isset($_GET['stream'])){
+   @header('Content-Type: text/event-stream; charset=utf-8');
+   rado_realtime_sse_send('stream_error',['error'=>'realtime_failed','request_id'=>$id]);
+   exit;
+ }
  rado_json(500,['ok'=>false,'error'=>'realtime_failed','request_id'=>$id]);
 }
