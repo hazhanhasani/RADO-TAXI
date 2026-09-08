@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-import 'advanced_passenger.dart';
 import 'app_update.dart';
+import 'runtime_passenger.dart';
 
 void main() => runApp(
       const RadoUpdateGate(app: 'passenger', child: RadoPassengerApp()),
@@ -24,7 +24,7 @@ class RadoPassengerApp extends StatelessWidget {
           primary: const Color(0xFF171717),
         ),
       ),
-      home: const AdvancedPassengerPage(),
+      home: const RuntimePassengerPage(),
     );
   }
 }
