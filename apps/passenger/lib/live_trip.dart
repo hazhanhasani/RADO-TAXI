@@ -32,6 +32,29 @@ class PassengerRealtimeApi {
     );
     return LiveTripSnapshot.fromJson(r.data ?? const {});
   }
+
+  Future<void> publishPassengerLocation({
+    required String clientId,
+    required String tripId,
+    required double lat,
+    required double lng,
+    double? accuracyMeters,
+    double? heading,
+    double? speedKph,
+  }) async {
+    await _dio.post<Map<String, dynamic>>(
+      '/api/v1/passenger/presence/',
+      data: {
+        'client_id': clientId,
+        'trip_id': tripId,
+        'lat': lat,
+        'lng': lng,
+        if (accuracyMeters != null) 'accuracy_m': accuracyMeters,
+        if (heading != null) 'heading': heading.round(),
+        if (speedKph != null) 'speed_kph': speedKph,
+      },
+    );
+  }
 }
 
 class LiveTripSnapshot {
