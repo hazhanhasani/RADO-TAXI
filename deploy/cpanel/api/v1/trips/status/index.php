@@ -1,6 +1,6 @@
 <?php
 declare(strict_types=1);
-require dirname(__DIR__, 5) . '/rado-system/lib/app.php';
+require dirname(__DIR__, 4) . '/rado-system/lib/app.php';
 
 try {
     $pdo = rado_db();
