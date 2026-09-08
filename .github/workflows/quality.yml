@@ -82,6 +82,12 @@ jobs:
           grep -q "rado-update-core.php" deploy/cpanel/bin/rado-update.php
           grep -q "rado_run_database_migrations" deploy/cpanel/rado-system/bin/rado-update-core.php
           grep -q "rado_run_platform_tick" deploy/cpanel/rado-system/bin/rado-update-core.php
+          grep -q "function radoUpdaterNowIsoTehran" deploy/cpanel/rado-system/bin/rado-update-core.php
+          grep -q "last_success_iso.*radoUpdaterNowIsoTehran" deploy/cpanel/rado-system/bin/rado-update-core.php
+          if grep -q "rado_now_iso_tehran" deploy/cpanel/rado-system/bin/rado-update-core.php; then
+            echo "Updater references undefined legacy timestamp function"
+            exit 1
+          fi
           grep -q "function rado_run_database_migrations" deploy/cpanel/rado-system/lib/migrate.php
           grep -q "function rado_run_platform_tick" deploy/cpanel/rado-system/lib/tick.php
 
