@@ -1,75 +1,24 @@
 <?php
 declare(strict_types=1);
 require dirname(__DIR__, 4) . '/rado-system/lib/app.php';
-
-if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-    rado_json(405, ['ok' => false, 'error' => 'method_not_allowed']);
-}
-
-try {
-    $body = rado_body();
-    $distance = filter_var($body['distance_meters'] ?? null, FILTER_VALIDATE_INT);
-    $duration = filter_var($body['duration_seconds'] ?? null, FILTER_VALIDATE_INT);
-    if ($distance === false || $duration === false || $distance < 0 || $duration < 0) {
-        rado_json(422, [
-            'ok' => false,
-            'error' => 'invalid_route_metrics',
-            'message' => 'اطلاعات مسافت یا زمان مسیر معتبر نیست.',
-        ]);
-    }
-
-    $pdo = rado_db();
-    $rule = rado_active_pricing_rule($pdo);
-    if ($rule === null) {
-        rado_json(409, [
-            'ok' => false,
-            'error' => 'pricing_not_configured',
-            'message' => 'تعرفه سفر هنوز در پنل مدیریت تنظیم نشده است.',
-        ]);
-    }
-
-    $breakdown = rado_fare_breakdown($rule, (int) $distance, (int) $duration);
-    rado_json(200, [
-        'ok' => true,
-        'fare' => $breakdown['fare'],
-        'currency' => 'IRR',
-        'calculated_at' => rado_jalali_datetime(null, true),
-        'timezone' => 'Asia/Tehran',
-        'pricing_rule' => [
-            'id' => (int) $rule['id'],
-            'title' => (string) $rule['title'],
-            'effective_from' => !empty($rule['effective_from']) ? rado_jalali_datetime((string)$rule['effective_from']) : null,
-        ],
-        'breakdown' => $breakdown,
-    ]);
-} catch (Throwable $e) {
-    $stateDir = rado_root() . '/rado-system/state';
-    @mkdir($stateDir, 0755, true);
-    $requestId = substr(bin2hex(random_bytes(8)), 0, 12);
-    @file_put_contents(
-        $stateDir . '/fare-errors.log',
-        '[' . rado_jalali_datetime(null, true) . '] ' . $requestId . ' ' . get_class($e) . ': ' . $e->getMessage() . "\n",
-        FILE_APPEND | LOCK_EX
-    );
-
-    $message = 'محاسبه کرایه روی سرور RADO انجام نشد. دیتابیس یا ساختار تعرفه نیاز به بررسی دارد.';
-    $error = 'fare_estimate_failed';
-    $status = 500;
-
-    if ($e instanceof PDOException) {
-        $error = 'database_unavailable';
-        $status = 503;
-        $message = 'دیتابیس RADO در دسترس نیست یا ساختار آن کامل نشده است. بروزرسانی خودکار سرور باید آن را اصلاح کند.';
-    } elseif ($e instanceof RuntimeException && $e->getMessage() === 'database_not_configured') {
-        $error = 'database_not_configured';
-        $status = 503;
-        $message = 'اتصال دیتابیس RADO روی هاست هنوز کامل نشده است.';
-    }
-
-    rado_json($status, [
-        'ok' => false,
-        'error' => $error,
-        'message' => $message,
-        'request_id' => $requestId,
-    ]);
-}
+if($_SERVER['REQUEST_METHOD']!=='POST')rado_json(405,['ok'=>false,'error'=>'method_not_allowed']);
+function farePointInPolygon(float $lat,float $lng,array $poly):bool{$inside=false;$n=count($poly);if($n<3)return false;for($i=0,$j=$n-1;$i<$n;$j=$i++){$xi=(float)($poly[$i][0]??0);$yi=(float)($poly[$i][1]??0);$xj=(float)($poly[$j][0]??0);$yj=(float)($poly[$j][1]??0);$intersect=(($yi>$lat)!==($yj>$lat))&&($lng<($xj-$xi)*($lat-$yi)/(($yj-$yi)?:1e-12)+$xi);if($intersect)$inside=!$inside;}return $inside;}
+try{
+ $b=rado_body();$distance=filter_var($b['distance_meters']??null,FILTER_VALIDATE_INT);$duration=filter_var($b['duration_seconds']??null,FILTER_VALIDATE_INT);if($distance===false||$duration===false||$distance<0||$duration<0)rado_json(422,['ok'=>false,'error'=>'invalid_route_metrics','message'=>'اطلاعات مسافت یا زمان مسیر معتبر نیست.']);
+ $pdo=rado_db();$rule=rado_active_pricing_rule($pdo);if($rule===null)rado_json(409,['ok'=>false,'error'=>'pricing_not_configured','message'=>'تعرفه سفر هنوز در پنل مدیریت تنظیم نشده است.']);
+ $base=rado_fare_breakdown($rule,(int)$distance,(int)$duration);$fare=(int)$base['fare'];$adjustments=[];$multiplier=1.0;$flat=0;
+ // Time schedule multiplier (Asia/Tehran DB session).
+ $dow=(int)(new DateTimeImmutable('now',rado_tehran_timezone()))->format('N');$time=(new DateTimeImmutable('now',rado_tehran_timezone()))->format('H:i:s');
+ $stmt=$pdo->query("SELECT * FROM pricing_schedules WHERE active=1 AND (starts_at IS NULL OR starts_at<=NOW()) AND (ends_at IS NULL OR ends_at>NOW()) ORDER BY multiplier DESC");
+ foreach($stmt->fetchAll() as $s){$days=array_filter(array_map('trim',explode(',',(string)($s['days_of_week']??''))));if($days&& !in_array((string)$dow,$days,true))continue;$start=(string)($s['start_time']??'');$end=(string)($s['end_time']??'');$match=true;if($start!==''&&$end!==''){$match=$start<=$end?($time>=$start&&$time<=$end):($time>=$start||$time<=$end);}if($match){$m=max(1,(float)$s['multiplier']);$multiplier*=$m;$adjustments[]=['type'=>'time','title'=>(string)$s['title'],'multiplier'=>$m];}}
+ // Service type multiplier is configurable without another migration.
+ $service=preg_replace('/[^a-z0-9_-]/i','',(string)($b['service_type']??'economy'))?:'economy';$serviceMult=max(0.1,(float)(rado_setting($pdo,'service_type_'.$service.'_multiplier','1')??'1'));if(abs($serviceMult-1)>0.0001){$multiplier*=$serviceMult;$adjustments[]=['type'=>'service','title'=>$service,'multiplier'=>$serviceMult];}
+ // Geofence pricing / blocked zones. Polygon points are [lng,lat].
+ $points=[];if(is_numeric($b['origin_lat']??null)&&is_numeric($b['origin_lng']??null))$points[]=['role'=>'origin','lat'=>(float)$b['origin_lat'],'lng'=>(float)$b['origin_lng']];if(is_numeric($b['destination_lat']??null)&&is_numeric($b['destination_lng']??null))$points[]=['role'=>'destination','lat'=>(float)$b['destination_lat'],'lng'=>(float)$b['destination_lng']];
+ if($points){foreach($pdo->query('SELECT * FROM service_areas WHERE active=1 ORDER BY id')->fetchAll() as $area){$poly=json_decode((string)$area['polygon_json'],true);if(!is_array($poly))continue;foreach($points as $point){if(!farePointInPolygon($point['lat'],$point['lng'],$poly))continue;if($area['area_type']==='blocked')rado_json(403,['ok'=>false,'error'=>'service_area_blocked','message'=>'این نقطه فعلاً خارج از محدوده قابل سرویس RADO است.','area'=>$area['title']]);$m=max(0.1,(float)$area['fare_multiplier']);$f=max(0,(int)$area['flat_surcharge']);if($area['area_type']!=='service'||$m!=1.0||$f>0){$multiplier*=$m;$flat+=$f;$adjustments[]=['type'=>'area','role'=>$point['role'],'title'=>$area['title'],'multiplier'=>$m,'flat'=>$f];}}}}
+ $fare=max((int)$rule['minimum_fare'],(int)round($fare*$multiplier)+$flat);$originalFare=$fare;$discount=0;$promoCode=strtoupper(trim((string)($b['promo_code']??'')));$clientId=trim((string)($b['client_id']??''));
+ if($promoCode!==''&&$clientId!==''){$uid=rado_guest_passenger($pdo,$clientId);$p=$pdo->prepare("SELECT * FROM promo_codes WHERE code=? AND active=1 AND (starts_at IS NULL OR starts_at<=NOW()) AND (ends_at IS NULL OR ends_at>NOW()) LIMIT 1");$p->execute([$promoCode]);$promo=$p->fetch();if(is_array($promo)&&$fare>=(int)$promo['min_fare']){$c=$pdo->prepare('SELECT COUNT(*) FROM promo_redemptions WHERE promo_id=? AND user_id=?');$c->execute([(int)$promo['id'],$uid]);if((int)$c->fetchColumn()<(int)$promo['per_user_limit']){$discount=$promo['discount_type']==='percent'?(int)round($fare*((float)$promo['discount_value']/100)):(int)$promo['discount_value'];if($promo['max_discount']!==null)$discount=min($discount,(int)$promo['max_discount']);$discount=max(0,min($discount,$fare));}}}
+ $payable=max(0,$fare-$discount);
+ $base['fare']=$payable;$base['pre_discount_fare']=$originalFare;$base['discount_amount']=$discount;$base['dynamic_multiplier']=$multiplier;$base['flat_adjustment']=$flat;$base['adjustments']=$adjustments;$base['service_type']=$service;
+ rado_json(200,['ok'=>true,'fare'=>$payable,'pre_discount_fare'=>$originalFare,'discount_amount'=>$discount,'currency'=>'IRR','calculated_at'=>rado_jalali_datetime(null,true),'timezone'=>'Asia/Tehran','pricing_rule'=>['id'=>(int)$rule['id'],'title'=>(string)$rule['title'],'effective_from'=>!empty($rule['effective_from'])?rado_jalali_datetime((string)$rule['effective_from']):null],'breakdown'=>$base]);
+}catch(Throwable $e){$stateDir=rado_root().'/rado-system/state';@mkdir($stateDir,0755,true);$requestId=substr(bin2hex(random_bytes(8)),0,12);@file_put_contents($stateDir.'/fare-errors.log','['.rado_jalali_datetime(null,true).'] '.$requestId.' '.get_class($e).': '.$e->getMessage()."\n",FILE_APPEND|LOCK_EX);$message='محاسبه کرایه روی سرور RADO انجام نشد. دیتابیس یا ساختار تعرفه نیاز به بررسی دارد.';$error='fare_estimate_failed';$status=500;if($e instanceof PDOException){$error='database_unavailable';$status=503;$message='دیتابیس RADO در دسترس نیست یا ساختار آن کامل نشده است.';}elseif($e instanceof RuntimeException&&$e->getMessage()==='database_not_configured'){$error='database_not_configured';$status=503;$message='اتصال دیتابیس RADO روی هاست هنوز کامل نشده است.';}rado_json($status,['ok'=>false,'error'=>$error,'message'=>$message,'request_id'=>$requestId]);}
