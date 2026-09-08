@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 require dirname(__DIR__, 3) . '/rado-system/lib/app.php';
+require_once dirname(__DIR__, 3) . '/rado-system/lib/platform.php';
 
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') rado_json(405, ['ok'=>false,'error'=>'method_not_allowed']);
 
@@ -67,9 +68,11 @@ try {
     if($promoId!==null)$pdo->prepare('INSERT INTO promo_redemptions(promo_id,user_id,trip_id,discount_amount) VALUES(?,?,?,?)')->execute([$promoId,$passengerId,$tripId,$discount]);
     $pdo->commit();
 
-    $notified=$dispatchNow?rado_dispatch_trip($pdo,$tripId,(float)$pickup['lat'],(float)$pickup['lng']):0;
+    $notified=$dispatchNow?rado_dispatch_trip_v2($pdo,$tripId,(float)$pickup['lat'],(float)$pickup['lng']):0;
     $row=rado_trip_row($pdo,$tripId);$payload=$row?rado_trip_payload($row):['id'=>$tripId,'status'=>$status,'status_fa'=>$status==='requested'?'زمان‌بندی‌شده':'در جستجوی راننده','estimated_fare'=>$fare,'timezone'=>'Asia/Tehran'];
+    if(!$dispatchNow)$payload['status_fa']='سفر زمان‌بندی‌شده';
     $payload['drivers_notified']=$notified;$payload['preferences']=['pickup_note'=>$pickupNote,'silent_trip'=>$silent,'payment_method'=>$payment,'service_type'=>$serviceType,'scheduled_for'=>$scheduledFor?rado_time_payload($scheduledFor):null,'promo_code'=>$promoCode?:null,'original_fare'=>$originalFare,'discount_amount'=>$discount,'stops_count'=>$seq-1];
+    rado_platform_event($pdo,'trip:'.$tripId,'trip_created',['status'=>$status,'scheduled_for'=>$scheduledFor,'fare'=>$fare]);
     rado_json(201,['ok'=>true,'trip'=>$payload,'server_time'=>rado_time_payload()]);
 } catch(Throwable $e){
     if(isset($pdo)&&$pdo instanceof PDO&&$pdo->inTransaction())$pdo->rollBack();
