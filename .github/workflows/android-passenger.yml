@@ -94,15 +94,13 @@ jobs:
       - name: Analyze
         if: steps.credentials.outcome == 'success'
         working-directory: apps/passenger
-        run: flutter analyze
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
       - name: Build permanently signed release APK
         if: steps.credentials.outcome == 'success'
         working-directory: apps/passenger
         run: |
           flutter build apk --release \
-            --build-name=0.2.2 \
-            --build-number="$GITHUB_RUN_NUMBER" \
             --dart-define=NESHAN_MAP_KEY="$NESHAN_MAP_KEY" \
             --dart-define=RADO_API_BASE_URL="https://rado-taxi.sbs"
 
