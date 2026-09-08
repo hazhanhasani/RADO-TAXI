@@ -1,0 +1,49 @@
+name: Realtime Capacity
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  live-operations:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate realtime PHP syntax
+        run: |
+          php -l deploy/cpanel/admin/live-map.php
+          php -l deploy/cpanel/admin/live-stream.php
+          php -l deploy/cpanel/api/v1/driver/presence/index.php
+          php -l deploy/cpanel/api/v1/passenger/presence/index.php
+          php -l deploy/cpanel/api/v1/realtime/index.php
+
+      - name: Validate Neshan MapLibre live control
+        run: |
+          set -euo pipefail
+          grep -q "@neshan-maps-platform/maplibre-sdk@5.24.4" deploy/cpanel/admin/live-map.php
+          grep -q "static.neshan.org/sdk/maplibre/styles/light.json" deploy/cpanel/admin/live-map.php
+          grep -q "apiKey:String(cfg.map_key)" deploy/cpanel/admin/live-map.php
+          grep -q "rado-trip-points" deploy/cpanel/admin/live-map.php
+          grep -q "rado-passengers" deploy/cpanel/admin/live-map.php
+          if grep -qi "leaflet" deploy/cpanel/admin/live-map.php; then
+            echo "Live Control must use Neshan MapLibre, not Leaflet"
+            exit 1
+          fi
+          if grep -q "tile.openstreetmap.org" deploy/cpanel/admin/live-map.php; then
+            echo "Live Control must not fall back to OSM tiles"
+            exit 1
+          fi
+
+      - name: Validate event deduplication and drain capacity
+        run: |
+          set -euo pipefail
+          grep -q "ops:drivers" deploy/cpanel/api/v1/driver/presence/index.php
+          grep -q "One useful realtime row per GPS sample" deploy/cpanel/api/v1/driver/presence/index.php
+          grep -q "channel LIKE 'trip:%' OR channel LIKE 'ops:%'" deploy/cpanel/admin/live-stream.php
+          grep -q "LIMIT 300" deploy/cpanel/admin/live-stream.php
+          grep -q "usleep(350000)" deploy/cpanel/admin/live-stream.php
+
+      - name: Run 50 100 200 driver capacity guard
+        run: python3 scripts/realtime_dispatch_load_test.py
