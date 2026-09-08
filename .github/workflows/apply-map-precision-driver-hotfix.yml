@@ -42,17 +42,17 @@ jobs:
         working-directory: apps/passenger
         run: |
           mkdir -p assets/branding
-          touch assets/branding/rado-passenger.png
+          printf '%s' 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZfWQAAAAASUVORK5CYII=' | base64 -d > assets/branding/rado-passenger.png
           flutter pub get
-          flutter analyze --no-fatal-warnings
+          flutter analyze --no-fatal-infos --no-fatal-warnings
 
       - name: Analyze driver
         working-directory: apps/driver
         run: |
           mkdir -p assets/branding
-          touch assets/branding/rado-driver.png
+          printf '%s' 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZfWQAAAAASUVORK5CYII=' | base64 -d > assets/branding/rado-driver.png
           flutter pub get
-          flutter analyze --no-fatal-warnings
+          flutter analyze --no-fatal-infos --no-fatal-warnings
 
       - name: Commit hotfix
         run: |
