@@ -30,6 +30,23 @@ function shouldPreserve(string $rel, array $config): bool {
     }
     return false;
 }
+function runDatabaseMigration(string $root): void {
+    $dbConfig = $root . '/rado-system/private/database.php';
+    if (!is_file($dbConfig)) {
+        throw new RuntimeException('Database configuration is missing; open setup.php once to complete RADO installation.');
+    }
+    $script = $root . '/rado-system/bin/rado-migrate.php';
+    if (!is_file($script)) {
+        throw new RuntimeException('RADO migration runner is missing from the cPanel package.');
+    }
+    $cmd = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($script) . ' 2>&1';
+    $output = [];
+    $code = 0;
+    exec($cmd, $output, $code);
+    if ($code !== 0) {
+        throw new RuntimeException('Database migration failed: ' . trim(implode(' | ', $output)));
+    }
+}
 try{
     $repo=$config['repo'];
     $release=json_decode(httpGet($config['github_api']."/repos/$repo/releases/latest",$config),true,512,JSON_THROW_ON_ERROR);
@@ -64,6 +81,8 @@ try{
             if($item->isDir()) @mkdir($dest,0755,true); else {@mkdir(dirname($dest),0755,true);copy($item->getPathname(),$dest);}
         }
         @unlink($tmpZip);
+        // Spawn a fresh PHP process so migrations use the newly-copied application code.
+        runDatabaseMigration($root);
     }
     file_put_contents($stateDir.'/release.json.tmp',json_encode($meta,JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_PRETTY_PRINT)); rename($stateDir.'/release.json.tmp',$stateDir.'/release.json');
     file_put_contents($stateDir.'/current_tag',$tag."\n");
