@@ -44,7 +44,7 @@ s = replace_once(
     if (!_mapReady || origin == null || _destination != null) return;
     try {
       await _map.ready.timeout(const Duration(seconds: 3));
-      final zoom = await _map.getCurrentZoom();
+      final zoom = (await _map.getCurrentZoom()) ?? 16.0;
       final targetZoom = zoom.clamp(15.0, 17.0).toDouble();
       // Move the camera slightly south. The saved origin then stays visibly
       // above the center destination selector instead of being hidden under it.
@@ -141,7 +141,7 @@ helper = """  Future<void> _fitLiveDriver(RideTrip trip) async {
         west - max(lngSpan * .35, .0015),
       );
       await Future<void>.delayed(const Duration(milliseconds: 140));
-      final zoom = await _map.getCurrentZoom();
+      final zoom = (await _map.getCurrentZoom()) ?? 16.0;
       final shift = min(max(latSpan * .30, .0018), .0048);
       _map.moveToLocation(
         ((north + south) / 2) - shift,

@@ -350,6 +350,15 @@ class _AdvancedDriverPageState extends State<AdvancedDriverPage> {
         });
       }
       _show(accept ? 'سفر پذیرفته شد.' : 'درخواست رد شد.');
+      if (accept && trip != null) {
+        try {
+          await _notifications.show(
+            title: 'سفر پذیرفته شد',
+            body: 'مسیر رسیدن به مسافر فعال شد.',
+            payload: trip.id,
+          );
+        } catch (_) {}
+      }
       await _refresh();
     } catch (e) {
       _show(_api.message(e));
@@ -373,6 +382,27 @@ class _AdvancedDriverPageState extends State<AdvancedDriverPage> {
       } else if (action == 'start') {
         _show('سفر شروع شد.');
       }
+      try {
+        String? noticeTitle;
+        String? noticeBody;
+        if (action == 'arrived') {
+          noticeTitle = 'رسیدن به مبدا ثبت شد';
+          noticeBody = 'مسافر از رسیدن شما باخبر شد.';
+        } else if (action == 'start') {
+          noticeTitle = 'سفر شروع شد';
+          noticeBody = 'مسیریابی به مقصد سفر فعال است.';
+        } else if (action == 'complete') {
+          noticeTitle = 'سفر پایان یافت';
+          noticeBody = 'پایان سفر با موفقیت ثبت شد.';
+        }
+        if (noticeTitle != null && noticeBody != null) {
+          await _notifications.show(
+            title: noticeTitle,
+            body: noticeBody,
+            payload: trip.id,
+          );
+        }
+      } catch (_) {}
       await _refresh(all: action == 'complete');
     } catch (e) {
       _show(_api.message(e));

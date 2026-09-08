@@ -206,11 +206,31 @@ class _RuntimePassengerPageState extends State<RuntimePassengerPage> {
         await _calculate();
       }
       await _syncMapOverlays();
+      if (_step == 1 && _destination == null && _origin != null) {
+        await _revealOriginForDestinationSelection();
+      }
     } catch (e) {
       _show(_ride.message(e));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  Future<void> _revealOriginForDestinationSelection() async {
+    final origin = _origin;
+    if (!_mapReady || origin == null || _destination != null) return;
+    try {
+      await _map.ready.timeout(const Duration(seconds: 3));
+      final zoom = (await _map.getCurrentZoom()) ?? 16.0;
+      final targetZoom = zoom.clamp(15.0, 17.0).toDouble();
+      // Move the camera slightly south. The saved origin then stays visibly
+      // above the center destination selector instead of being hidden under it.
+      _map.moveToLocation(
+        origin.latitude - .0017,
+        origin.longitude,
+        zoom: targetZoom,
+      );
+    } catch (_) {}
   }
 
   Future<void> _calculate() async {
@@ -271,8 +291,11 @@ class _RuntimePassengerPageState extends State<RuntimePassengerPage> {
       final zoom = await _map.getCurrentZoom();
       // The booking/tracking card covers the lower part of the screen. Shift the
       // camera slightly south so both endpoints and the full route stay above it.
-      final visualLat =
-          ((north + south) / 2) - max((north - south) * .18, .0007);
+      final cameraShift = min(
+        max((north - south) * .34, .0023),
+        .0062,
+      );
+      final visualLat = ((north + south) / 2) - cameraShift;
       final visualLng = (east + west) / 2;
       _map.moveToLocation(visualLat, visualLng, zoom: zoom);
     } catch (_) {}
@@ -323,6 +346,7 @@ class _RuntimePassengerPageState extends State<RuntimePassengerPage> {
       });
       if (_mapReady) _map.moveToLocation(selected.lat, selected.lng, zoom: 16);
       await _syncMapOverlays();
+      await _revealOriginForDestinationSelection();
     }
   }
 
@@ -365,6 +389,13 @@ class _RuntimePassengerPageState extends State<RuntimePassengerPage> {
       _poller = Timer.periodic(const Duration(seconds: 20), (_) => _poll());
       await _syncMapOverlays();
       await _poll();
+      try {
+        await _notifications.show(
+          title: 'درخواست سفر ثبت شد',
+          body: 'درخواست شما برای رانندگان نزدیک RADO ارسال شد.',
+          payload: trip.id,
+        );
+      } catch (_) {}
       _show('درخواست برای رانندگان نزدیک ارسال شد.');
     } catch (e) {
       _show(_ride.message(e));
@@ -535,7 +566,13 @@ class _RuntimePassengerPageState extends State<RuntimePassengerPage> {
             _lastEventId = max(_lastEventId, live.lastEventId);
         }
       });
-      if (oldStatus != fresh.status) await _notifyTripTransition(fresh);
+      if (oldStatus != fresh.status) {
+        await _notifyTripTransition(fresh);
+        if (['driver_assigned', 'driver_arriving', 'arrived', 'in_progress']
+            .contains(fresh.status)) {
+          unawaited(_fitLiveDriver(fresh));
+        }
+      }
       await _updateDriverRoute(fresh);
       await _syncMapOverlays();
       if (fresh.terminal || fresh.status == 'in_progress') {
@@ -615,7 +652,7 @@ class _RuntimePassengerPageState extends State<RuntimePassengerPage> {
       return;
     final now = DateTime.now();
     if (_lastDriverRouteAt != null &&
-        now.difference(_lastDriverRouteAt!).inSeconds < 15 &&
+        now.difference(_lastDriverRouteAt!).inSeconds < 9 &&
         _driverRoute != null)
       return;
     final target = trip.status == 'in_progress'
@@ -629,6 +666,37 @@ class _RuntimePassengerPageState extends State<RuntimePassengerPage> {
         _driverRouteEtaMinutes = max(1, (route.durationSeconds / 60).round());
         _lastDriverRouteAt = now;
       });
+    } catch (_) {}
+  }
+
+  Future<void> _fitLiveDriver(RideTrip trip) async {
+    final pos = _live?.driverPosition;
+    if (!_mapReady || pos == null || trip.terminal) return;
+    final target = trip.status == 'in_progress'
+        ? trip.destination.point
+        : trip.pickup.point;
+    final north = max(pos.lat, target.latitude);
+    final south = min(pos.lat, target.latitude);
+    final east = max(pos.lng, target.longitude);
+    final west = min(pos.lng, target.longitude);
+    final latSpan = north - south;
+    final lngSpan = east - west;
+    try {
+      await _map.ready.timeout(const Duration(seconds: 3));
+      _map.fitBounds(
+        north + max(latSpan * .48, .0019),
+        south - max(latSpan * .48, .0019),
+        east + max(lngSpan * .35, .0015),
+        west - max(lngSpan * .35, .0015),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 140));
+      final zoom = (await _map.getCurrentZoom()) ?? 16.0;
+      final shift = min(max(latSpan * .30, .0018), .0048);
+      _map.moveToLocation(
+        ((north + south) / 2) - shift,
+        (east + west) / 2,
+        zoom: zoom,
+      );
     } catch (_) {}
   }
 
@@ -680,6 +748,17 @@ class _RuntimePassengerPageState extends State<RuntimePassengerPage> {
         strokeWidth: 2.5,
         strokeOpacity: .9,
       ),
+    if (_live?.driverPosition != null)
+      NeshanCircle(
+        id: 'live-driver-halo',
+        center: _live!.driverPosition!.point,
+        radius: 38,
+        fillColor: _yellow,
+        fillOpacity: .18,
+        strokeColor: _yellow,
+        strokeWidth: 3,
+        strokeOpacity: .95,
+      ),
   ];
 
   List<NeshanPolyline> _mapPolylines() => [
@@ -695,8 +774,8 @@ class _RuntimePassengerPageState extends State<RuntimePassengerPage> {
       NeshanPolyline(
         id: 'route-main',
         coordinates: _route!.points,
-        color: _yellow,
-        width: 5,
+        color: const Color(0xFF1565C0),
+        width: 6.5,
         opacity: 1,
       ),
     if (_driverRoute != null && _driverRoute!.points.length >= 2)
@@ -711,9 +790,9 @@ class _RuntimePassengerPageState extends State<RuntimePassengerPage> {
       NeshanPolyline(
         id: 'driver-route-live',
         coordinates: _driverRoute!.points,
-        color: Colors.blue,
-        width: 4.5,
-        opacity: .95,
+        color: _yellow,
+        width: 5.5,
+        opacity: 1,
       ),
   ];
 
@@ -1241,6 +1320,21 @@ class _RuntimePassengerPageState extends State<RuntimePassengerPage> {
                 ),
               ),
             Positioned(top: 12, left: 12, right: 12, child: _header()),
+            if (_trip != null && _live?.driverPosition != null)
+              Positioned(
+                top: 94,
+                left: 16,
+                child: Material(
+                  elevation: 7,
+                  color: Colors.white,
+                  shape: const CircleBorder(),
+                  child: IconButton(
+                    tooltip: 'نمایش راننده روی نقشه',
+                    onPressed: () => _fitLiveDriver(_trip!),
+                    icon: const Icon(Icons.my_location_rounded),
+                  ),
+                ),
+              ),
             Positioned(
               left: 12,
               right: 12,
@@ -1438,6 +1532,25 @@ class _RuntimePassengerPageState extends State<RuntimePassengerPage> {
                   ),
                 ],
               ),
+              const SizedBox(height: 5),
+              const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.alt_route_rounded,
+                    size: 15,
+                    color: Color(0xFF1565C0),
+                  ),
+                  SizedBox(width: 5),
+                  Flexible(
+                    child: Text(
+                      'مسیر پیشنهادی نشان با خط آبی روی نقشه نمایش داده شده است.',
+                      style: TextStyle(fontSize: 10, color: Colors.black54),
+                      textAlign: TextAlign.center,
+                    ),
+                  ),
+                ],
+              ),
             ],
             if (fare != null) ...[
               const SizedBox(height: 9),
@@ -1611,7 +1724,39 @@ class _RuntimePassengerPageState extends State<RuntimePassengerPage> {
               ],
             ),
           ),
-          if (rating != null)
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE8F7ED),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.circle, color: Colors.green, size: 8),
+                    SizedBox(width: 4),
+                    Text(
+                      'زنده',
+                      style: TextStyle(fontSize: 9, fontWeight: FontWeight.w900),
+                    ),
+                  ],
+                ),
+              ),
+              if (_live?.driverPosition?.speedKph != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    '${_live!.driverPosition!.speedKph!.round()} km/h',
+                    style: const TextStyle(fontSize: 9, color: Colors.black54),
+                  ),
+                ),
+            ],
+          ),
+          if (rating != null) ...[
+            const SizedBox(width: 6),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
               decoration: BoxDecoration(
@@ -1629,19 +1774,24 @@ class _RuntimePassengerPageState extends State<RuntimePassengerPage> {
                 ],
               ),
             ),
+          ],
         ],
       ),
     );
   }
 
   Widget _liveEtaCard(RideTrip trip) {
-    final eta = _live!.eta!;
-    final minutes = _driverRouteEtaMinutes ?? eta.minutes;
+    final eta = _live?.eta;
+    final route = _driverRoute;
+    final minutes = _driverRouteEtaMinutes ?? eta?.minutes;
     final approaching = trip.status != 'in_progress';
     final title = approaching ? 'رسیدن راننده' : 'زمان تا مقصد';
     final value = trip.status == 'arrived'
         ? 'راننده رسیده است'
+        : minutes == null
+        ? 'در حال محاسبه مسیر زنده…'
         : 'حدود $minutes دقیقه';
+    final distance = route?.distanceLabel ?? eta?.distanceLabel ?? 'مسیر زنده';
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -1672,7 +1822,7 @@ class _RuntimePassengerPageState extends State<RuntimePassengerPage> {
             ),
           ),
           Text(
-            eta.distanceLabel,
+            distance,
             style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
           ),
         ],
@@ -1758,7 +1908,7 @@ class _RuntimePassengerPageState extends State<RuntimePassengerPage> {
               const SizedBox(height: 8),
               _liveDriverCard(trip),
             ],
-            if (_live?.eta != null && !trip.terminal) ...[
+            if ((_live?.eta != null || _driverRoute != null) && !trip.terminal) ...[
               const SizedBox(height: 8),
               _liveEtaCard(trip),
             ],

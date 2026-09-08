@@ -247,7 +247,9 @@ async function initMap(){
       apiKey:String(cfg.map_key),
       attributionControl:true,
     });
-    map.addControl(new maplibregl.NavigationControl({showCompass:true,showZoom:true}),'top-left');
+    if(typeof maplibregl.NavigationControl==='function'){
+      map.addControl(new maplibregl.NavigationControl({showCompass:true,showZoom:true}),'top-left');
+    }
     mapLoadTimer=setTimeout(()=>{if(!mapReady)failMap('بارگذاری نقشه نشان بیش از حد طول کشید. Web Map Key، دسترسی دامنه و اینترنت تلویزیون را بررسی کنید.');},12000);
     map.on('load',async()=>{
       clearTimeout(mapLoadTimer);mapReady=true;document.getElementById('mapError').classList.remove('show');addLiveLayers();await loadSnapshot();
