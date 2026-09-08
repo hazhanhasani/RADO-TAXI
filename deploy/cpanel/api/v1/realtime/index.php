@@ -1,0 +1,15 @@
+<?php
+declare(strict_types=1);
+require dirname(__DIR__, 3) . '/rado-system/lib/app.php';
+
+if($_SERVER['REQUEST_METHOD']!=='GET')rado_json(405,['ok'=>false,'error'=>'method_not_allowed']);
+try{
+ $pdo=rado_db();$clientId=trim((string)($_GET['client_id']??''));$tripId=trim((string)($_GET['trip_id']??''));$role=(string)($_GET['role']??'passenger');if($clientId===''||$tripId==='')rado_json(422,['ok'=>false,'error'=>'trip_required']);
+ if($role==='driver'){$driver=rado_driver_from_client($pdo,$clientId);$userId=$driver['id']??null;$check=$pdo->prepare('SELECT * FROM trips WHERE id=? AND driver_id=? LIMIT 1');}
+ else{$userId=rado_passenger_from_client($pdo,$clientId);$check=$pdo->prepare('SELECT * FROM trips WHERE id=? AND passenger_id=? LIMIT 1');}
+ if(!$userId)rado_json(403,['ok'=>false,'error'=>'unauthorized']);$check->execute([$tripId,$userId]);$trip=$check->fetch();if(!is_array($trip))rado_json(404,['ok'=>false,'error'=>'trip_not_found']);
+ $driverPosition=null;$eta=null;
+ if(!empty($trip['driver_id'])){$p=$pdo->prepare('SELECT latitude,longitude,heading,speed_kph,last_seen_at FROM driver_presence WHERE driver_id=? AND latitude IS NOT NULL AND longitude IS NOT NULL LIMIT 1');$p->execute([(string)$trip['driver_id']]);$pos=$p->fetch();if(is_array($pos)&&!empty($pos['last_seen_at'])){$fresh=strtotime((string)$pos['last_seen_at'])>=time()-180;if($fresh){$targetLat=in_array($trip['status'],['driver_assigned','driver_arriving','arrived'],true)?(float)$trip['pickup_lat']:(float)$trip['destination_lat'];$targetLng=in_array($trip['status'],['driver_assigned','driver_arriving','arrived'],true)?(float)$trip['pickup_lng']:(float)$trip['destination_lng'];$meters=rado_distance_m((float)$pos['latitude'],(float)$pos['longitude'],$targetLat,$targetLng);$speed=max(12,(float)($pos['speed_kph']??0));if($speed<12)$speed=25;$minutes=max(1,(int)ceil(($meters/1000)/$speed*60));$driverPosition=['lat'=>(float)$pos['latitude'],'lng'=>(float)$pos['longitude'],'heading'=>$pos['heading']===null?null:(int)$pos['heading'],'speed_kph'=>$pos['speed_kph']===null?null:(float)$pos['speed_kph'],'last_seen_at'=>rado_time_payload((string)$pos['last_seen_at'])];$eta=['distance_meters'=>(int)round($meters),'minutes'=>$minutes,'target'=>in_array($trip['status'],['driver_assigned','driver_arriving','arrived'],true)?'pickup':'destination'];}}}
+ $since=max(0,(int)($_GET['since_event_id']??0));$ev=$pdo->prepare('SELECT id,event_type,payload_json,created_at FROM realtime_events WHERE channel=? AND id>? AND expires_at>NOW() ORDER BY id ASC LIMIT 100');$ev->execute(['trip:'.$tripId,$since]);$events=$ev->fetchAll();foreach($events as &$x){$x['payload']=json_decode((string)$x['payload_json'],true)?:[];$x['created_at_jalali']=rado_jalali_datetime((string)$x['created_at']);unset($x['payload_json'],$x['created_at']);}
+ rado_json(200,['ok'=>true,'trip_id'=>$tripId,'status'=>(string)$trip['status'],'driver_position'=>$driverPosition,'eta'=>$eta,'events'=>$events,'server_time'=>rado_time_payload()]);
+}catch(Throwable $e){$id=substr(bin2hex(random_bytes(8)),0,12);rado_json(500,['ok'=>false,'error'=>'realtime_failed','request_id'=>$id]);}
