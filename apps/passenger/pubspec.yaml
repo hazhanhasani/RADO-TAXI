@@ -15,6 +15,7 @@ dependencies:
   latlong2: ^0.10.1
   neshan_maps_flutter: ^1.1.0
   package_info_plus: ^8.1.2
+  shared_preferences: ^2.5.3
   url_launcher: ^6.3.1
 
 dev_dependencies:
