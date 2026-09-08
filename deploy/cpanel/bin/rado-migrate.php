@@ -9,6 +9,7 @@ if (PHP_SAPI !== 'cli') {
 $root = dirname(__DIR__, 2);
 $dbFile = $root . '/rado-system/private/database.php';
 $schemaFile = $root . '/sql/schema.sql';
+$migrationsDir = $root . '/sql/migrations';
 
 if (!is_file($dbFile)) {
     fwrite(STDERR, "RADO database configuration is missing.\n");
@@ -17,6 +18,15 @@ if (!is_file($dbFile)) {
 if (!is_file($schemaFile)) {
     fwrite(STDERR, "RADO schema.sql is missing.\n");
     exit(3);
+}
+
+function radoRunSqlFile(PDO $pdo, string $path): void {
+    $sql = (string)file_get_contents($path);
+    $statements = preg_split('/;\s*(?:\r?\n|$)/', trim($sql)) ?: [];
+    foreach ($statements as $statement) {
+        $statement = trim($statement);
+        if ($statement !== '') $pdo->exec($statement);
+    }
 }
 
 try {
@@ -35,13 +45,12 @@ try {
     ]);
     try { $pdo->exec("SET time_zone = '+03:30'"); } catch (Throwable) {}
 
-    $sql = (string)file_get_contents($schemaFile);
-    $statements = preg_split('/;\s*(?:\r?\n|$)/', trim($sql)) ?: [];
-    foreach ($statements as $statement) {
-        $statement = trim($statement);
-        if ($statement !== '') {
-            $pdo->exec($statement);
-        }
+    radoRunSqlFile($pdo, $schemaFile);
+
+    if (is_dir($migrationsDir)) {
+        $files = glob($migrationsDir . '/*.sql') ?: [];
+        sort($files, SORT_STRING);
+        foreach ($files as $file) radoRunSqlFile($pdo, $file);
     }
 
     // CREATE TABLE IF NOT EXISTS does not add new columns to existing tables.
@@ -52,9 +61,9 @@ try {
     }
 
     $pdo->exec("INSERT INTO system_settings(setting_key,setting_value,is_secret) VALUES('default_driver_commission_rate','10.00',0) ON DUPLICATE KEY UPDATE setting_key=VALUES(setting_key)");
-    $pdo->exec("INSERT INTO schema_migrations(version) VALUES ('cpanel-mysql-0.3.2-auto-repair') ON DUPLICATE KEY UPDATE version=VALUES(version)");
+    $pdo->exec("INSERT INTO schema_migrations(version) VALUES ('cpanel-mysql-0.4.0-migration-runner') ON DUPLICATE KEY UPDATE version=VALUES(version)");
 
-    echo "RADO database schema is ready.\n";
+    echo "RADO database schema and migrations are ready.\n";
 } catch (Throwable $e) {
     fwrite(STDERR, 'RADO database migration failed: ' . $e->getMessage() . "\n");
     exit(1);
