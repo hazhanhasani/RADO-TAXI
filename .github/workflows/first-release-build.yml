@@ -1,19 +1,23 @@
-name: RADO First Production Build
+name: RADO Production Release
 
 on:
   push:
     branches: [main]
     paths:
-      - '.github/RADO_FIRST_RELEASE_BUILD'
+      - '.github/RADO_VERSION'
 
 permissions:
   contents: write
   id-token: write
 
+concurrency:
+  group: rado-production-release
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 50
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -24,12 +28,46 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Resolve release version
+      - name: Resolve and validate release version
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          VERSION="$(tr -d '[:space:]' < .github/RADO_FIRST_RELEASE_BUILD)"
-          test -n "$VERSION" || (echo 'Empty release version' && exit 1)
+          VERSION="$(tr -d '[:space:]' < .github/RADO_VERSION)"
+          python3 - "$VERSION" <<'PY'
+          import re, sys
+          version=sys.argv[1]
+          m=re.fullmatch(r'(\d+)\.(\d+)\.(\d+)', version)
+          if not m:
+              raise SystemExit('RADO_VERSION must be strict SemVer: X.Y.Z')
+          major,minor,patch=map(int,m.groups())
+          if minor >= 1000 or patch >= 1000:
+              raise SystemExit('minor and patch must stay below 1000')
+          code=major*1_000_000 + minor*1_000 + patch
+          if code <= 0 or code > 2_100_000_000:
+              raise SystemExit('Computed Android versionCode is out of range')
+          print(f'BUILD_CODE={code}')
+          with open('/tmp/rado-build-code','w') as f: f.write(str(code))
+          PY
+
+          LATEST="$(curl -fsSL \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/latest" \
+            | python3 -c "import json,sys; print(json.load(sys.stdin).get('tag_name','v0.0.0').lstrip('v'))" \
+            || echo '0.0.0')"
+
+          python3 - "$VERSION" "$LATEST" <<'PY'
+          import sys
+          def semver(v):
+              return tuple(map(int,v.split('.')))
+          target,latest=sys.argv[1:3]
+          if semver(target) <= semver(latest):
+              raise SystemExit(f'Release version {target} must be greater than latest published {latest}')
+          print(f'Publishing {target}; latest is {latest}')
+          PY
+
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-          echo "BUILD_CODE=$GITHUB_RUN_NUMBER" >> "$GITHUB_ENV"
+          echo "BUILD_CODE=$(cat /tmp/rado-build-code)" >> "$GITHUB_ENV"
 
       - name: Fetch permanent signing credentials from RADO cPanel
         run: bash scripts/fetch_cpanel_ci_credentials.sh
@@ -177,3 +215,39 @@ jobs:
             RADO-cPanel-v${{ env.VERSION }}.zip
             RADO-release.json
             SHA256SUMS.txt
+
+      - name: Verify release is really published
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sleep 3
+          curl -fsSL \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/tags/v${VERSION}" \
+            > /tmp/rado-release-published.json
+          python3 - <<'PY'
+          import json, os
+          version=os.environ['VERSION']
+          with open('/tmp/rado-release-published.json') as f:
+              release=json.load(f)
+          if release.get('draft') or release.get('prerelease'):
+              raise SystemExit('Release exists but is not a final published release')
+          if release.get('tag_name') != f'v{version}':
+              raise SystemExit('Published tag does not match requested version')
+          assets={a['name']: int(a.get('size') or 0) for a in release.get('assets',[])}
+          required={
+              f'RADO-Passenger-v{version}.apk': 1_000_000,
+              f'RADO-Driver-v{version}.apk': 1_000_000,
+              f'RADO-cPanel-v{version}.zip': 10_000,
+              'RADO-release.json': 100,
+              'SHA256SUMS.txt': 100,
+          }
+          missing=[name for name in required if name not in assets]
+          if missing:
+              raise SystemExit('Published release is missing assets: '+', '.join(missing))
+          tiny=[name for name,min_size in required.items() if assets[name] < min_size]
+          if tiny:
+              raise SystemExit('Published assets look incomplete: '+', '.join(tiny))
+          print(f'RADO v{version} is a real final GitHub Release with all required assets.')
+          PY
