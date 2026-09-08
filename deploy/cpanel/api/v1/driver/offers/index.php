@@ -118,6 +118,7 @@ try {
     $pdo->commit();
 
     rado_platform_event($pdo,'trip:'.$tripId,'driver_assigned',['driver_id'=>$driverId,'auto'=>false]);
+    rado_platform_notify($pdo,(string)$trip['passenger_id'],'راننده سفر را پذیرفت','راننده RADO در مسیر مبدا است.','driver_assigned',['trip_id'=>$tripId,'driver_id'=>$driverId]);
     $row = rado_trip_row($pdo, $tripId);
     rado_json(200, [
         'ok'=>true,

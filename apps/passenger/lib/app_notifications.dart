@@ -4,7 +4,8 @@ class RadoNotifications {
   RadoNotifications._();
   static final RadoNotifications instance = RadoNotifications._();
 
-  final FlutterLocalNotificationsPlugin _plugin = FlutterLocalNotificationsPlugin();
+  final FlutterLocalNotificationsPlugin _plugin =
+      FlutterLocalNotificationsPlugin();
   bool _ready = false;
   int _serial = 1000;
 
@@ -14,12 +15,18 @@ class RadoNotifications {
     const settings = InitializationSettings(android: android);
     await _plugin.initialize(settings);
     await _plugin
-        .resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>()
+        .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin
+        >()
         ?.requestNotificationsPermission();
     _ready = true;
   }
 
-  Future<void> show({required String title, required String body, String? payload}) async {
+  Future<void> show({
+    required String title,
+    required String body,
+    String? payload,
+  }) async {
     if (!_ready) await init();
     const android = AndroidNotificationDetails(
       'rado_trip_events',

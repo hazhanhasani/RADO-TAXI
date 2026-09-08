@@ -27,7 +27,7 @@ try {
             if($status==='completed'){$pdo->commit();$row=rado_trip_row($pdo,$tripId);rado_json(200,['ok'=>true,'trip'=>$row?rado_trip_payload($row):null,'already_completed'=>true]);}
             $pdo->rollBack();rado_json(409,['ok'=>false,'error'=>'invalid_transition','message'=>'فقط سفر در حال انجام را می‌توان پایان داد.']);
         }
-        $finalFare=(int)($trip['estimated_fare']??0);$pdo->prepare("UPDATE trips SET status='completed',final_fare=?,completed_at=NOW(),version=version+1 WHERE id=?")->execute([$finalFare,$tripId]);$trip['final_fare']=$finalFare;$trip['commission_rate']=(float)($driver['commission_rate']??0);$finance=rado_complete_trip_finance($pdo,$trip);rado_sync_wallet_cache($pdo,$driverId);$platformFinance=rado_complete_platform_finance($pdo,$trip);
+        $finalFare=(int)($trip['estimated_fare']??0);$pdo->prepare("UPDATE trips SET status='completed',final_fare=?,completed_at=NOW(),version=version+1 WHERE id=?")->execute([$finalFare,$tripId]);$trip['final_fare']=$finalFare;$trip['commission_rate']=(float)($driver['commission_rate']??0);$finance=rado_complete_trip_finance($pdo,$trip);rado_sync_wallet_cache($pdo,$driverId);$platformFinance=rado_complete_platform_finance($pdo,$trip);rado_platform_event($pdo,'trip:'.$tripId,'completed',['driver_id'=>$driverId,'fare'=>$finalFare]);rado_platform_notify($pdo,(string)$trip['passenger_id'],'سفر پایان یافت','سفر RADO پایان یافت. می‌توانید به راننده امتیاز بدهید.','trip_completed',['trip_id'=>$tripId]);
     }
     if($action==='cancel'){
         if(!in_array($status,['driver_assigned','driver_arriving','arrived'],true)){$pdo->rollBack();rado_json(409,['ok'=>false,'error'=>'invalid_transition','message'=>'در این مرحله امکان لغو سفر وجود ندارد.']);}
