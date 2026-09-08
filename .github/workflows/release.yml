@@ -136,7 +136,7 @@ jobs:
           p=Path('android/app/src/main/AndroidManifest.xml')
           s=p.read_text()
           marker='<manifest xmlns:android="http://schemas.android.com/apk/res/android">'
-          replacement='''<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n    <uses-permission android:name="android.permission.INTERNET"/>\n    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>'''
+          replacement='''<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n    <uses-permission android:name="android.permission.INTERNET"/>\n    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>\n    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>\n    <uses-permission android:name="android.permission.CAMERA"/>\n    <uses-permission android:name="android.permission.RECORD_AUDIO"/>'''
           if 'android.permission.INTERNET' not in s: s=s.replace(marker,replacement,1)
           p.write_text(s)
           PY
@@ -180,6 +180,9 @@ jobs:
           test -f dist/cpanel/admin/index.php
           test -f dist/cpanel/admin/maps.php
           test -f dist/cpanel/admin/live-map.php
+          test -f dist/cpanel/admin/verification.php
+          test -f dist/cpanel/admin/verification-settings.php
+          test -f dist/cpanel/admin/driver-document.php
           test -f dist/cpanel/api/v1/maps/config/index.php
           test -f dist/cpanel/api/v1/maps/reverse/index.php
           test -f dist/cpanel/api/v1/maps/search/index.php
@@ -188,6 +191,9 @@ jobs:
           test -f dist/cpanel/api/v1/trips/index.php
           test -f dist/cpanel/api/v1/trips/status/index.php
           test -f dist/cpanel/api/v1/driver/offers/index.php
+          test -f dist/cpanel/api/v1/driver/verification/index.php
+          test -f dist/cpanel/rado-system/lib/api_ir.php
+          test -f dist/cpanel/sql/migrations/043_driver_verification.sql
           test -f dist/cpanel/rado-system/bin/rado-update-core.php
           test -f dist/cpanel/rado-system/bin/rado-update.php
           test -f dist/cpanel/rado-system/bin/rado-tick.php
