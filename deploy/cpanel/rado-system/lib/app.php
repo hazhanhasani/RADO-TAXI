@@ -105,11 +105,6 @@ function rado_jalali_long(DateTimeInterface|string|null $value = null, bool $per
     return $persianDigits ? rado_fa_digits($out) : $out;
 }
 
-function rado_now_iso_tehran(): string
-{
-    return (new DateTimeImmutable('now', rado_tehran_timezone()))->format('c');
-}
-
 function rado_time_payload(DateTimeInterface|string|null $value = null): array
 {
     $dt = rado_tehran_datetime($value);
@@ -117,7 +112,6 @@ function rado_time_payload(DateTimeInterface|string|null $value = null): array
         'timezone' => 'Asia/Tehran',
         'jalali' => rado_jalali_datetime($dt),
         'jalali_long' => rado_jalali_long($dt),
-        'iso_tehran' => $dt->format('c'),
     ];
 }
 
@@ -171,7 +165,28 @@ function rado_db(): PDO
         $pdo->exec("SET time_zone = '+03:30'");
     } catch (Throwable) {
     }
+    rado_ensure_runtime_schema($pdo);
     return $pdo;
+}
+
+function rado_column_exists(PDO $pdo, string $table, string $column): bool
+{
+    $stmt = $pdo->prepare('SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? AND COLUMN_NAME=?');
+    $stmt->execute([$table, $column]);
+    return (int)$stmt->fetchColumn() > 0;
+}
+
+function rado_ensure_runtime_schema(PDO $pdo): void
+{
+    static $done = false;
+    if ($done) return;
+    $done = true;
+
+    if (!rado_column_exists($pdo, 'trips', 'arrived_at')) {
+        $pdo->exec('ALTER TABLE trips ADD COLUMN arrived_at DATETIME NULL AFTER accepted_at');
+    }
+    $pdo->exec("INSERT INTO system_settings(setting_key,setting_value,is_secret) VALUES('default_driver_commission_rate','10.00',0) ON DUPLICATE KEY UPDATE setting_key=VALUES(setting_key)");
+    $pdo->exec("INSERT INTO schema_migrations(version) VALUES ('cpanel-mysql-0.3.0-trip-lifecycle') ON DUPLICATE KEY UPDATE version=VALUES(version)");
 }
 
 function rado_uuid4(): string
@@ -233,24 +248,94 @@ function rado_set_setting(PDO $pdo, string $key, string $value): void
     $stmt->execute([$key, $value]);
 }
 
-function rado_guest_passenger(PDO $pdo, string $clientId): string
+function rado_device_phone(string $prefix, string $clientId): string
 {
     $clientId = trim($clientId);
     if ($clientId === '' || strlen($clientId) > 160) {
         throw new InvalidArgumentException('invalid_client_id');
     }
-    $phone = 'g' . substr(hash('sha256', $clientId), 0, 18);
+    return $prefix . substr(hash('sha256', $clientId), 0, 18);
+}
+
+function rado_guest_passenger(PDO $pdo, string $clientId): string
+{
+    $phone = rado_device_phone('g', $clientId);
     $stmt = $pdo->prepare("SELECT id FROM users WHERE phone=? AND role='passenger' LIMIT 1");
     $stmt->execute([$phone]);
     $id = $stmt->fetchColumn();
-    if ($id !== false) {
-        return (string) $id;
-    }
+    if ($id !== false) return (string)$id;
 
     $id = rado_uuid4();
     $stmt = $pdo->prepare("INSERT INTO users(id,phone,role,full_name,is_active) VALUES(?,?,'passenger','مسافر رادو',1)");
     $stmt->execute([$id, $phone]);
     return $id;
+}
+
+function rado_passenger_from_client(PDO $pdo, string $clientId): ?string
+{
+    $phone = rado_device_phone('g', $clientId);
+    $stmt = $pdo->prepare("SELECT id FROM users WHERE phone=? AND role='passenger' LIMIT 1");
+    $stmt->execute([$phone]);
+    $id = $stmt->fetchColumn();
+    return $id === false ? null : (string)$id;
+}
+
+function rado_guest_driver(PDO $pdo, string $clientId): array
+{
+    $phone = rado_device_phone('d', $clientId);
+    $stmt = $pdo->prepare("SELECT u.id,u.phone,u.full_name,u.is_active,d.status,d.commission_rate,d.plate_number,d.vehicle_make,d.vehicle_model,d.vehicle_color FROM users u LEFT JOIN drivers d ON d.user_id=u.id WHERE u.phone=? AND u.role='driver' LIMIT 1");
+    $stmt->execute([$phone]);
+    $row = $stmt->fetch();
+    if (is_array($row) && !empty($row['id'])) {
+        if ($row['status'] === null) {
+            $rate = (float)(rado_setting($pdo, 'default_driver_commission_rate', '10.00') ?? '10.00');
+            $ins = $pdo->prepare("INSERT IGNORE INTO drivers(user_id,status,commission_rate) VALUES(?,'pending',?)");
+            $ins->execute([(string)$row['id'], $rate]);
+            return rado_guest_driver($pdo, $clientId);
+        }
+        return $row;
+    }
+
+    $id = rado_uuid4();
+    $rate = (float)(rado_setting($pdo, 'default_driver_commission_rate', '10.00') ?? '10.00');
+    $pdo->beginTransaction();
+    try {
+        $stmt = $pdo->prepare("INSERT INTO users(id,phone,role,full_name,is_active) VALUES(?,?,'driver','راننده جدید رادو',1)");
+        $stmt->execute([$id, $phone]);
+        $stmt = $pdo->prepare("INSERT INTO drivers(user_id,status,commission_rate) VALUES(?,'pending',?)");
+        $stmt->execute([$id, $rate]);
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        throw $e;
+    }
+    return rado_guest_driver($pdo, $clientId);
+}
+
+function rado_driver_from_client(PDO $pdo, string $clientId): ?array
+{
+    $phone = rado_device_phone('d', $clientId);
+    $stmt = $pdo->prepare("SELECT u.id,u.phone,u.full_name,u.is_active,d.status,d.commission_rate,d.plate_number,d.vehicle_make,d.vehicle_model,d.vehicle_color FROM users u JOIN drivers d ON d.user_id=u.id WHERE u.phone=? AND u.role='driver' LIMIT 1");
+    $stmt->execute([$phone]);
+    $row = $stmt->fetch();
+    return is_array($row) ? $row : null;
+}
+
+function rado_require_approved_driver(PDO $pdo, string $clientId): array
+{
+    $driver = rado_driver_from_client($pdo, $clientId);
+    if ($driver === null) {
+        $driver = rado_guest_driver($pdo, $clientId);
+    }
+    if ((int)($driver['is_active'] ?? 0) !== 1 || (string)($driver['status'] ?? '') !== 'approved') {
+        rado_json(403, [
+            'ok'=>false,
+            'error'=>'driver_not_approved',
+            'message'=>'حساب راننده هنوز توسط مدیریت رادو تأیید نشده است.',
+            'driver_status'=>(string)($driver['status'] ?? 'pending'),
+        ]);
+    }
+    return $driver;
 }
 
 function rado_distance_m(float $lat1, float $lng1, float $lat2, float $lng2): float
@@ -266,10 +351,10 @@ function rado_distance_m(float $lat1, float $lng1, float $lat2, float $lng2): fl
 
 function rado_dispatch_trip(PDO $pdo, string $tripId, float $pickupLat, float $pickupLng): int
 {
-    $stmt = $pdo->query("SELECT d.user_id,p.latitude,p.longitude,p.last_seen_at FROM drivers d JOIN driver_presence p ON p.driver_id=d.user_id WHERE d.status='approved' AND p.is_online=1 AND p.latitude IS NOT NULL AND p.longitude IS NOT NULL AND p.last_seen_at>=DATE_SUB(NOW(),INTERVAL 2 MINUTE) LIMIT 80");
+    $stmt = $pdo->query("SELECT d.user_id,p.latitude,p.longitude FROM drivers d JOIN driver_presence p ON p.driver_id=d.user_id WHERE d.status='approved' AND p.is_online=1 AND p.latitude IS NOT NULL AND p.longitude IS NOT NULL AND p.last_seen_at>=DATE_SUB(NOW(),INTERVAL 2 MINUTE) LIMIT 80");
     $candidates = [];
     foreach ($stmt->fetchAll() as $row) {
-        $distance = rado_distance_m($pickupLat, $pickupLng, (float) $row['latitude'], (float) $row['longitude']);
+        $distance = rado_distance_m($pickupLat, $pickupLng, (float)$row['latitude'], (float)$row['longitude']);
         if ($distance <= 5000) {
             $row['distance_m'] = $distance;
             $candidates[] = $row;
@@ -277,13 +362,136 @@ function rado_dispatch_trip(PDO $pdo, string $tripId, float $pickupLat, float $p
     }
     usort($candidates, fn(array $a, array $b) => $a['distance_m'] <=> $b['distance_m']);
     $candidates = array_slice($candidates, 0, 4);
-    $insert = $pdo->prepare('INSERT IGNORE INTO trip_offers(trip_id,driver_id,offered_at,expires_at) VALUES(?,?,NOW(),DATE_ADD(NOW(),INTERVAL 15 SECOND))');
+    $insert = $pdo->prepare('INSERT IGNORE INTO trip_offers(trip_id,driver_id,offered_at,expires_at) VALUES(?,?,NOW(),DATE_ADD(NOW(),INTERVAL 25 SECOND))');
     $count = 0;
     foreach ($candidates as $candidate) {
-        $insert->execute([$tripId, (string) $candidate['user_id']]);
-        if ($insert->rowCount() > 0) {
-            $count++;
-        }
+        $insert->execute([$tripId, (string)$candidate['user_id']]);
+        if ($insert->rowCount() > 0) $count++;
     }
     return $count;
+}
+
+function rado_offer_waiting_trip_to_driver(PDO $pdo, string $driverId, float $lat, float $lng): void
+{
+    $stmt = $pdo->query("SELECT id,pickup_lat,pickup_lng FROM trips WHERE status='searching' AND requested_at>=DATE_SUB(NOW(),INTERVAL 10 MINUTE) ORDER BY requested_at ASC LIMIT 40");
+    $items = [];
+    foreach ($stmt->fetchAll() as $row) {
+        $distance = rado_distance_m($lat, $lng, (float)$row['pickup_lat'], (float)$row['pickup_lng']);
+        if ($distance <= 5000) {
+            $row['distance_m'] = $distance;
+            $items[] = $row;
+        }
+    }
+    usort($items, fn(array $a, array $b) => $a['distance_m'] <=> $b['distance_m']);
+    if ($items === []) return;
+    $tripId = (string)$items[0]['id'];
+    $stmt = $pdo->prepare('INSERT IGNORE INTO trip_offers(trip_id,driver_id,offered_at,expires_at) VALUES(?,?,NOW(),DATE_ADD(NOW(),INTERVAL 25 SECOND))');
+    $stmt->execute([$tripId, $driverId]);
+}
+
+function rado_wallet_balance(PDO $pdo, string $userId): int
+{
+    $stmt = $pdo->prepare('SELECT COALESCE(SUM(amount),0) FROM ledger_entries WHERE user_id=?');
+    $stmt->execute([$userId]);
+    return (int)$stmt->fetchColumn();
+}
+
+function rado_trip_status_fa(string $status): string
+{
+    return match ($status) {
+        'requested', 'searching' => 'در جستجوی راننده',
+        'driver_assigned', 'driver_arriving' => 'راننده در مسیر مبدا',
+        'arrived' => 'راننده به مبدا رسید',
+        'in_progress' => 'سفر در حال انجام',
+        'completed' => 'سفر پایان یافت',
+        'cancelled_by_passenger' => 'لغو توسط مسافر',
+        'cancelled_by_driver' => 'لغو توسط راننده',
+        'cancelled_by_admin' => 'لغو توسط مدیریت',
+        'expired' => 'درخواست منقضی شد',
+        default => $status,
+    };
+}
+
+function rado_trip_row(PDO $pdo, string $tripId): ?array
+{
+    $stmt = $pdo->prepare("SELECT t.*,pu.full_name passenger_name,pu.phone passenger_phone,du.full_name driver_name,d.plate_number,d.vehicle_make,d.vehicle_model,d.vehicle_color,d.commission_rate FROM trips t LEFT JOIN users pu ON pu.id=t.passenger_id LEFT JOIN users du ON du.id=t.driver_id LEFT JOIN drivers d ON d.user_id=t.driver_id WHERE t.id=? LIMIT 1");
+    $stmt->execute([$tripId]);
+    $row = $stmt->fetch();
+    return is_array($row) ? $row : null;
+}
+
+function rado_trip_payload(array $row): array
+{
+    $time = static function ($value): ?array {
+        if ($value === null || trim((string)$value) === '') return null;
+        return rado_time_payload((string)$value);
+    };
+    return [
+        'id'=>(string)$row['id'],
+        'status'=>(string)$row['status'],
+        'status_fa'=>rado_trip_status_fa((string)$row['status']),
+        'pickup'=>[
+            'lat'=>(float)$row['pickup_lat'],
+            'lng'=>(float)$row['pickup_lng'],
+            'label'=>(string)($row['pickup_label'] ?? ''),
+        ],
+        'destination'=>[
+            'lat'=>(float)$row['destination_lat'],
+            'lng'=>(float)$row['destination_lng'],
+            'label'=>(string)($row['destination_label'] ?? ''),
+        ],
+        'estimated_distance_m'=>(int)($row['estimated_distance_m'] ?? 0),
+        'estimated_duration_s'=>(int)($row['estimated_duration_s'] ?? 0),
+        'estimated_fare'=>(int)($row['estimated_fare'] ?? 0),
+        'final_fare'=>$row['final_fare'] === null ? null : (int)$row['final_fare'],
+        'driver'=>$row['driver_id'] === null ? null : [
+            'id'=>(string)$row['driver_id'],
+            'name'=>(string)($row['driver_name'] ?? 'راننده رادو'),
+            'plate'=>(string)($row['plate_number'] ?? ''),
+            'vehicle'=>trim((string)($row['vehicle_make'] ?? '') . ' ' . (string)($row['vehicle_model'] ?? '')),
+            'color'=>(string)($row['vehicle_color'] ?? ''),
+        ],
+        'times'=>[
+            'requested'=>$time($row['requested_at'] ?? null),
+            'accepted'=>$time($row['accepted_at'] ?? null),
+            'arrived'=>$time($row['arrived_at'] ?? null),
+            'started'=>$time($row['started_at'] ?? null),
+            'completed'=>$time($row['completed_at'] ?? null),
+            'cancelled'=>$time($row['cancelled_at'] ?? null),
+        ],
+        'timezone'=>'Asia/Tehran',
+    ];
+}
+
+function rado_complete_trip_finance(PDO $pdo, array $trip): array
+{
+    $tripId = (string)$trip['id'];
+    $driverId = (string)($trip['driver_id'] ?? '');
+    if ($driverId === '') throw new RuntimeException('trip_has_no_driver');
+
+    $fare = (int)($trip['final_fare'] ?? $trip['estimated_fare'] ?? 0);
+    $rate = (float)($trip['commission_rate'] ?? 0);
+    if ($rate < 0 || $rate > 100) $rate = 0;
+    $commission = (int)round($fare * $rate / 100);
+    $net = $fare - $commission;
+    $balance = rado_wallet_balance($pdo, $driverId);
+
+    $insert = $pdo->prepare('INSERT IGNORE INTO ledger_entries(user_id,trip_id,entry_type,amount,balance_after,idempotency_key,metadata_json) VALUES(?,?,?,?,?,?,?)');
+    $meta = json_encode(['commission_rate'=>$rate,'fare'=>$fare], JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
+
+    $insert->execute([$driverId,$tripId,'trip_gross',$fare,$balance+$fare,"trip:$tripId:gross",$meta]);
+    if ($insert->rowCount() > 0) $balance += $fare;
+
+    $insert->execute([$driverId,$tripId,'platform_commission',-$commission,$balance-$commission,"trip:$tripId:commission",$meta]);
+    if ($insert->rowCount() > 0) $balance -= $commission;
+
+    $insert->execute([null,$tripId,'platform_commission_income',$commission,null,"trip:$tripId:platform_income",$meta]);
+
+    return [
+        'fare'=>$fare,
+        'commission_rate'=>$rate,
+        'commission'=>$commission,
+        'driver_net'=>$net,
+        'wallet_balance'=>rado_wallet_balance($pdo, $driverId),
+    ];
 }
