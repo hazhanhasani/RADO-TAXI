@@ -11,6 +11,7 @@ dependencies:
     sdk: flutter
   cupertino_icons: ^1.0.8
   dio: ^5.8.0+1
+  flutter_local_notifications: ^19.5.0
   geolocator: ^14.0.2
   latlong2: ^0.10.1
   neshan_maps_flutter: ^1.1.0
