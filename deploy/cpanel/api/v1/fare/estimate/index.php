@@ -29,9 +29,12 @@ try {
         'ok' => true,
         'fare' => $breakdown['fare'],
         'currency' => 'IRR',
+        'calculated_at' => rado_jalali_datetime(null, true),
+        'timezone' => 'Asia/Tehran',
         'pricing_rule' => [
             'id' => (int) $rule['id'],
             'title' => (string) $rule['title'],
+            'effective_from' => !empty($rule['effective_from']) ? rado_jalali_datetime((string)$rule['effective_from']) : null,
         ],
         'breakdown' => $breakdown,
     ]);
