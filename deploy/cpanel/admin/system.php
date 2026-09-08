@@ -4,6 +4,24 @@ require __DIR__.'/_ui.php';
 ra_require_admin();
 $root=dirname(__DIR__);
 $pdo=rado_db();
+$migrationMessage='';
+$migrationError='';
+
+if($_SERVER['REQUEST_METHOD']==='POST'){
+  ra_require_csrf();
+  try{
+    $action=(string)($_POST['action']??'');
+    if($action!=='run_migrations')throw new RuntimeException('عملیات سیستم معتبر نیست.');
+    require_once $root.'/rado-system/lib/migrate.php';
+    $result=rado_run_database_migrations($root);
+    $files=is_array($result['files']??null)?array_keys($result['files']):[];
+    $migrationMessage='Migration/Update با موفقیت اجرا شد'.($files!==[]?' — '.implode('، ',$files):'').' — '.rado_jalali_datetime();
+    @unlink($root.'/rado-system/state/last_error_current.log');
+  }catch(Throwable $e){
+    $migrationError=$e->getMessage();
+  }
+}
+
 $current=ra_state('current_tag','نامشخص');
 $target=ra_state('target_tag',$current);
 $status=ra_state('update_status','unknown');
@@ -58,23 +76,30 @@ $driverMeta=$root.'/downloads/'.str_replace('v','RADO-Driver-v',$remote).'.apk';
 $passExists=is_file($passMeta);$driverExists=is_file($driverMeta);
 $dbOk=true;try{$pdo->query('SELECT 1')->fetchColumn();}catch(Throwable){$dbOk=false;}
 $pricingOk=rado_active_pricing_rule($pdo)!==null;
+$verificationSchemaOk=ra_table_exists($pdo,'driver_verification_profiles')&&ra_table_exists($pdo,'driver_verification_checks')&&ra_table_exists($pdo,'driver_verification_corrections');
 $updaterHealthy=!$cronStale&&$status!=='error'&&$lastError==='';
-ra_header('سیستم و آپدیت','system','سلامت سرویس، Cron و همگام‌سازی Release');
+ra_header('سیستم و آپدیت','system','سلامت سرویس، Cron، Migration و همگام‌سازی Release');
 ?>
+<?php if($migrationMessage!==''):?><div class="notice ok"><b><?=ra_e($migrationMessage)?></b></div><?php endif;?>
+<?php if($migrationError!==''):?><div class="notice err"><b>Migration/Update ناموفق بود</b><br><code style="white-space:pre-wrap;word-break:break-word"><?=ra_e(mb_substr($migrationError,0,1600))?></code></div><?php endif;?>
 <div class="grid">
  <div class="card span3 metric"><small>نسخه cPanel</small><b><?=ra_e($current)?></b><span class="muted">وضعیت <?=ra_e($status)?></span></div>
  <div class="card span3 metric"><small>آخرین Release شناخته‌شده</small><b><?=ra_e($remote)?></b><span class="muted"><?=$pending?'آپدیت در انتظار':'همگام'?></span></div>
  <div class="card span3 metric"><small>آخرین Cron موفق</small><b style="font-size:14px"><?=ra_e($lastSuccess)?></b><span class="muted"><?=$cronStale?'قدیمی / نیاز به بررسی':'تازه'?></span></div>
- <div class="card span3 metric"><small>Updater</small><b><?=$updaterHealthy?'سالم':'نیاز به بررسی'?></b><span class="muted">DB <?=$dbOk?'✓':'✕'?> · Pricing <?=$pricingOk?'✓':'✕'?></span></div>
+ <div class="card span3 metric"><small>Database Migration</small><b><?=$verificationSchemaOk?'سالم':'نیاز به اجرا'?></b><span class="muted">KYC <?=$verificationSchemaOk?'✓':'✕'?></span></div>
 </div>
 <?php if($pending):?><div class="notice warn">Release جدید <?=ra_e($remote)?> شناخته شده ولی cPanel هنوز روی <?=ra_e($current)?> است. Cron در اجرای بعدی باید آن را دریافت کند.</div><?php endif;?>
+<?php if(!$verificationSchemaOk):?><div class="notice err"><b>ساختار دیتابیس احراز هویت ناقص است.</b><br>دکمه Migration/Update پایین را بزنید؛ این عملیات داده‌های فعلی را پاک نمی‌کند و Migrationهای idempotent پروژه را اعمال می‌کند.</div><?php endif;?>
 <?php if($remoteError!==''):?><div class="notice warn"><b>GitHub موقتاً پاسخ نداده است.</b><br>پنل از وضعیت ذخیره‌شده روی cPanel استفاده می‌کند؛ این مورد به‌تنهایی خطای updater محسوب نمی‌شود.<br><span class="muted"><?=ra_e($remoteError)?></span></div><?php endif;?>
 <?php if($cronStale):?><div class="notice err">بیش از ۱۵ دقیقه از آخرین اجرای موفق updater گذشته است؛ Cron یا اتصال شبکه هاست باید بررسی شود.</div><?php endif;?>
 <?php if($lastError!==''):?><div class="notice err"><b>خطای جاری updater</b><br><code style="white-space:pre-wrap;word-break:break-word"><?=ra_e(mb_substr($lastError,0,1200))?></code></div><?php endif;?>
 <?php if($bootstrapError!==''):?><div class="notice warn"><b>خطای جاری Bootstrap</b><br><code style="white-space:pre-wrap;word-break:break-word"><?=ra_e(mb_substr($bootstrapError,0,800))?></code></div><?php endif;?>
 <div class="grid">
+ <div class="card span6"><h2 class="section-title">Migration / Update دیتابیس</h2><p class="muted">برای ساخت جدول‌های جدید، اصلاح ستون‌ها و ترمیم Migration جاافتاده استفاده می‌شود. اجرای مجدد امن است و برای رفع مشکل احراز هویت همین بخش را اجرا کنید.</p><form method="post"><input type="hidden" name="csrf" value="<?=ra_e(ra_csrf())?>"><input type="hidden" name="action" value="run_migrations"><button class="btn goldbtn" type="submit">اجرای Migration/Update</button></form></div>
  <div class="card span6"><h2 class="section-title">وضعیت همگام‌سازی</h2><div class="tablewrap"><table class="table" style="min-width:0"><tr><th>بخش</th><th>وضعیت</th></tr><tr><td>GitHub latest / cached target</td><td><?=ra_e($remote)?></td></tr><tr><td>cPanel current</td><td><?=ra_e($current)?></td></tr><tr><td>target_tag</td><td><?=ra_e($target)?></td></tr><tr><td>update_status</td><td><?=ra_e($status)?></td></tr><tr><td>Passenger mirror</td><td><?=$passExists?'موجود روی هاست':'در انتظار Mirror'?></td></tr><tr><td>Driver mirror</td><td><?=$driverExists?'موجود روی هاست':'در انتظار Mirror'?></td></tr></table></div></div>
- <div class="card span6"><h2 class="section-title">Cron</h2><p class="muted">Updater باید هر ۵ دقیقه اجرا شود. خطاهای موقت GitHub در اجرای بعدی دوباره امتحان می‌شوند و دیگر تاریخچه خطا به‌عنوان خطای جاری نمایش داده نمی‌شود.</p><div style="background:#171717;color:#f7d15c;padding:12px;border-radius:11px;direction:ltr;overflow:auto;font-size:10px"><code>*/5 * * * * php -q /FULL/PATH/TO/DOCUMENT_ROOT/rado-system/bin/rado-update.php &gt;/dev/null 2&gt;&amp;1</code></div></div>
 </div>
-<div class="grid"><div class="card span12"><h2 class="section-title">عیب‌یابی سریع</h2><div class="grid" style="margin-top:0"><div class="card span3"><b>Database</b><div class="<?=$dbOk?'notice ok':'notice err'?>"><?=$dbOk?'OK':'ERROR'?></div></div><div class="card span3"><b>Pricing</b><div class="<?=$pricingOk?'notice ok':'notice err'?>"><?=$pricingOk?'OK':'NOT CONFIGURED'?></div></div><div class="card span3"><b>Updater</b><div class="<?=$updaterHealthy?'notice ok':'notice err'?>"><?=$updaterHealthy?'OK':ra_e($status)?></div></div><div class="card span3"><b>زمان</b><div class="notice ok">Asia/Tehran<br><?=ra_e(rado_jalali_datetime())?></div></div></div></div></div>
+<div class="grid">
+ <div class="card span6"><h2 class="section-title">Cron</h2><p class="muted">Updater باید هر ۵ دقیقه اجرا شود. از این نسخه، حتی اگر Tag همان نسخه فعلی باشد Migrationها دوباره بررسی می‌شوند تا آپدیت ناقص به‌صورت خودکار ترمیم شود.</p><div style="background:#171717;color:#f7d15c;padding:12px;border-radius:11px;direction:ltr;overflow:auto;font-size:10px"><code>*/5 * * * * php -q /FULL/PATH/TO/DOCUMENT_ROOT/rado-system/bin/rado-update.php &gt;/dev/null 2&gt;&amp;1</code></div></div>
+ <div class="card span6"><h2 class="section-title">عیب‌یابی سریع</h2><div class="grid" style="margin-top:0"><div class="card span3"><b>Database</b><div class="<?=$dbOk?'notice ok':'notice err'?>"><?=$dbOk?'OK':'ERROR'?></div></div><div class="card span3"><b>KYC Schema</b><div class="<?=$verificationSchemaOk?'notice ok':'notice err'?>"><?=$verificationSchemaOk?'OK':'MISSING'?></div></div><div class="card span3"><b>Updater</b><div class="<?=$updaterHealthy?'notice ok':'notice err'?>"><?=$updaterHealthy?'OK':ra_e($status)?></div></div><div class="card span3"><b>زمان</b><div class="notice ok">Asia/Tehran<br><?=ra_e(rado_jalali_datetime())?></div></div></div></div>
+</div>
 <?php ra_footer();
