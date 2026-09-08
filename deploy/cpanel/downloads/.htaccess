@@ -1,5 +1,13 @@
 Options -Indexes
 AddType application/vnd.android.package-archive .apk
+RewriteEngine On
+
+# If the APK has already been mirrored to cPanel, Apache serves it directly.
+# If it is not present yet, route only valid RADO APK names through the
+# controlled fallback endpoint so users never see a broken 404 link.
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteRule ^(RADO-(Passenger|Driver)-v[0-9]+\.[0-9]+\.[0-9]+\.apk)$ index.php?file=$1 [L,QSA,NE]
+
 <IfModule mod_headers.c>
   Header set X-Content-Type-Options "nosniff"
   Header set Cache-Control "public, max-age=3600"
