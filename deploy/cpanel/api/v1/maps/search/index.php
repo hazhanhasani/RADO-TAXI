@@ -1,6 +1,6 @@
 <?php
 declare(strict_types=1);
-require dirname(__DIR__, 5) . '/rado-system/lib/app.php';
+require dirname(__DIR__, 4) . '/rado-system/lib/app.php';
 
 if ($_SERVER['REQUEST_METHOD'] !== 'GET') rado_json(405,['ok'=>false,'error'=>'method_not_allowed']);
 $q=trim((string)($_GET['q']??''));
