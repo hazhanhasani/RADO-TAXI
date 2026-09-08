@@ -15,10 +15,24 @@ jobs:
           test -f backend/database/schema.sql
           test -f apps/passenger/pubspec.yaml
           test -f apps/driver/pubspec.yaml
+          test -f deploy/cpanel/api/v1/trips/status/index.php
+          test -f deploy/cpanel/api/v1/driver/session/index.php
+          test -f deploy/cpanel/api/v1/driver/presence/index.php
+          test -f deploy/cpanel/api/v1/driver/offers/index.php
+          test -f deploy/cpanel/api/v1/driver/trip/index.php
+          test -f deploy/cpanel/api/v1/driver/wallet/index.php
 
       - name: PHP syntax check
         run: |
           find deploy/cpanel -type f -name '*.php' -print0 | xargs -0 -n1 php -l
+
+      - name: Validate cPanel API core include depth
+        run: |
+          if grep -R "dirname(__DIR__, 5).*rado-system/lib/app.php" deploy/cpanel/api/v1; then
+            echo "Invalid cPanel API include depth detected"
+            exit 1
+          fi
+          grep -R "dirname(__DIR__, 4).*rado-system/lib/app.php" deploy/cpanel/api/v1/driver deploy/cpanel/api/v1/trips/status
 
       - name: Verify Tehran and Jalali calendar core
         run: |
