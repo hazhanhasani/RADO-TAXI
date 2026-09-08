@@ -1,0 +1,79 @@
+name: Apply Passenger Live Presence
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.maintenance/APPLY_PASSENGER_LIVE_PRESENCE'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: rado-passenger-live-presence
+  cancel-in-progress: false
+
+jobs:
+  patch-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Apply passenger live presence patch
+        run: python3 scripts/apply_passenger_live_presence.py
+
+      - name: Format Dart sources
+        run: |
+          dart format \
+            apps/passenger/lib/runtime_passenger.dart \
+            apps/passenger/lib/live_trip.dart \
+            apps/driver/lib/advanced_driver.dart
+
+      - name: Validate PHP and patch shape
+        run: |
+          set -euo pipefail
+          grep -q "getPositionStream" apps/passenger/lib/runtime_passenger.dart
+          grep -q "publishPassengerLocation" apps/passenger/lib/live_trip.dart
+          grep -q "passenger_location" deploy/cpanel/admin/live-map.php
+          grep -q "passenger_presence" deploy/cpanel/admin/live-map.php
+          grep -q "موقعیت زنده مسافر" deploy/cpanel/admin/live-map.php
+          php -l deploy/cpanel/api/v1/passenger/presence/index.php
+          php -l deploy/cpanel/admin/live-map.php
+          php -l deploy/cpanel/api/v1/realtime/index.php
+          git diff --check
+
+      - name: Analyze passenger app
+        working-directory: apps/passenger
+        run: |
+          flutter pub get
+          flutter analyze --no-fatal-warnings --no-fatal-infos
+
+      - name: Analyze driver app
+        working-directory: apps/driver
+        run: |
+          flutter pub get
+          flutter analyze --no-fatal-warnings --no-fatal-infos
+
+      - name: Commit validated live passenger presence
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            apps/passenger/lib/runtime_passenger.dart \
+            apps/passenger/lib/live_trip.dart \
+            apps/driver/lib/advanced_driver.dart \
+            deploy/cpanel/admin/live-map.php
+          if git diff --cached --quiet; then
+            echo "Passenger live presence already applied"
+            exit 0
+          fi
+          git commit -m "feat(realtime): live passenger presence on trip map"
+          git push origin HEAD:main
